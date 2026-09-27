@@ -5,8 +5,8 @@ from pathlib import Path
 
 # --- CONFIGURATION ---
 INPUT_PBFS = [
-    "basse-normandie-260925.osm.pbf",
-    "haute-normandie-260925.osm.pbf",
+    "basse-normandie-260926.osm.pbf",
+    "haute-normandie-260926.osm.pbf",
 ]
 OUTPUT_PBF = "normandy-latest.osm.pbf"
 

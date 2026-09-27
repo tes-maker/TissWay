@@ -13,6 +13,7 @@ venv/
 
 # GTFS data
 gtfs_nomad/
+gtfs_atoumod/
 
 # Generated outputs
 output_osm/

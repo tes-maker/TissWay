@@ -1,38 +1,47 @@
-"""Génère un fichier .osm PTv2 par ligne NOMAD, à relire dans JOSM (avec PT Assistant).
+"""Génère un fichier .osm PTv2 par ligne de bus/car du GTFS régional Atoumod (tous réseaux : Nomad,
+Twisto, Astuce...), à relire dans JOSM (avec PT Assistant).
 
 Pour chaque variante : la stop_position (existante ou créée sur la voie) et le quai de chaque arrêt,
 puis les voies map-matchées par Valhalla. Les voies ne sont pas découpées et les trous ne sont pas
 comblés : c'est à faire dans JOSM, qui met à jour les relations des voies découpées.
 
-Usage : python mapping.py [numéros de ligne...]   (sans argument : toutes les lignes)
+Usage : python mapping.py [-r RÉSEAU] [numéros de ligne...]   (sans argument : toutes les lignes, tous réseaux)
 """
 
+import argparse
 import copy
 import math
 import re
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import xml.etree.ElementTree as ET
 from collections import ChainMap, Counter
-from itertools import count, groupby
+from functools import lru_cache
+from itertools import chain, count, groupby
 from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
 import requests
 
+GEO_API_URL = "https://geo.api.gouv.fr/communes"
 VALHALLA_URL = "http://localhost:8002"
 PBF_PATH = "normandy-latest.osm.pbf"
-GTFS_DIR = "gtfs_nomad"
+GTFS_DIR = "gtfs_atoumod"
 OSM_STOPS_CACHE = "osm_bus_stops.geojsonseq"
 OUTPUT_DIR = Path("output_osm")
 MAX_STOP_DISTANCE_M = 20  # arrêt GTFS -> quai OSM existant
 MAX_STOP_POSITION_M = 40  # arrêt GTFS -> voie empruntée (stop_position)
 MAX_TRACE_M = 150_000  # Valhalla refuse les traces de plus de 200 km : on découpe au-delà
 MIN_VARIANT_SHARE = 0.10
-NETWORK = {"network": "Nomad", "network:wikidata": "Q98131290", "network:wikipedia": "fr:Nomad (réseau)"}
-OPERATOR = {"operator": "Keolis", "operator:wikidata": "Q664399", "operator:wikipedia": "fr:Keolis"}
+BUS_ROUTE_TYPE = "3"  # GTFS route_type : on ignore train/tram/ferry, hors périmètre (voies + Valhalla costing bus)
+# Réseaux vérifiés sur OSM (network:wikidata) ; les autres sont dérivés de agency_name, sans wikidata inventé.
+NETWORKS = {
+    "040": {"network": "Nomad", "network:wikidata": "Q98131290", "network:wikipedia": "fr:Nomad (réseau)"},
+    "029": {"network": "Twisto", "network:wikidata": "Q3537947"},
+}
 GTFS_FEED = "FR-NOR-Atoumod"
 MEMBER_TYPES = {"n": "node", "w": "way", "r": "relation"}
 new_ids = count(1)
@@ -56,10 +65,16 @@ def project(p, a, b):
     return t, math.hypot(ax + t * dx, ay + t * dy)
 
 
+def right_of(p, a, b):
+    """p est-il à droite du segment orienté a -> b (sens de progression sur la voie) ?"""
+    (ax, ay), (bx, by) = xy(a, p), xy(b, p)
+    return ax * by - ay * bx < 0
+
+
 # --- Données GTFS et OSM ---
 
 def match_stops(stops):
-    """stop_id GTFS -> quai OSM ("n123"/"w456") le plus proche, ou None si aucun à moins de 20 m."""
+    """stop_id GTFS -> quais OSM candidats à moins de 20 m : [{"id": "n123"/"w456", "pos": (lat, lon), "name"}]."""
     if not Path(OSM_STOPS_CACHE).is_file():  # arrêts de bus du PBF, extraits une fois avec osmium
         subprocess.run(["osmium", "tags-filter", PBF_PATH, "n/highway=bus_stop",
                         "nw/public_transport=platform", "-o", "stops.pbf", "--overwrite"], check=True)
@@ -68,12 +83,15 @@ def match_stops(stops):
         Path("stops.pbf").unlink()
     osm = gpd.read_file(OSM_STOPS_CACHE).to_crs(epsg=2154)
     osm["geometry"] = osm.geometry.centroid
-    osm = osm[osm["id"].str[0].isin(["n", "w"])][["id", "geometry"]]
-    gdf = gpd.GeoDataFrame(stops, crs="EPSG:4326", geometry=gpd.points_from_xy(
+    osm = osm[osm["id"].str[0].isin(["n", "w"])][["id", "name", "geometry"]]
+    ll = osm.to_crs(epsg=4326).geometry
+    osm = osm.assign(lat=ll.y, lon=ll.x)
+    gdf = gpd.GeoDataFrame(stops[["stop_id"]], crs="EPSG:4326", geometry=gpd.points_from_xy(
         stops["stop_lon"].astype(float), stops["stop_lat"].astype(float))).to_crs(epsg=2154)
-    joined = gpd.sjoin_nearest(gdf, osm, how="left", max_distance=MAX_STOP_DISTANCE_M)
-    joined = joined[~joined.index.duplicated()]
-    return {s: (i if isinstance(i, str) else None) for s, i in zip(joined["stop_id"], joined["id"])}
+    platforms = {s: [] for s in stops["stop_id"]}
+    for r in gpd.sjoin(gdf, osm, predicate="dwithin", distance=MAX_STOP_DISTANCE_M).itertuples():
+        platforms[r.stop_id].append({"id": r.id, "pos": (r.lat, r.lon), "name": r.name})
+    return platforms
 
 
 def unescape(s):
@@ -139,10 +157,74 @@ def map_match(shape_pts):
 
 # --- Construction d'une ligne ---
 
-def stop_tags(stop, stop_id):
-    """Tags d'un quai Nomad tirés du GTFS."""
-    tags = {"public_transport": "platform", "highway": "bus_stop", "bus": "yes", "name": stop["short_name"],
-            **NETWORK, **OPERATOR, "gtfs:stop_id": stop_id, "ref:FR:Atoumod": stop_id}
+def unaccent(s):
+    return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+
+
+def slug(s):
+    return re.sub(r"[^a-z0-9]+", "-", unaccent(s).lower()).strip("-")
+
+
+def agency_networks(agency):
+    """agency_id -> tags réseau (NETWORKS si connu, sinon dérivé de agency_name : "Twisto (Caen la mer)"
+    -> {"network": "Twisto"}, sans exploitant ni wikidata non vérifiés)."""
+    codes = agency["agency_id"].str.split(":").str[2]
+    names = agency["agency_name"].str.partition(" (")[0].str.strip()
+    return {i: NETWORKS.get(c, {"network": n}) for i, c, n in zip(agency["agency_id"], codes, names)}
+
+
+@lru_cache(maxsize=None)
+def communes(dept):
+    """Code INSEE -> nom officiel des communes d'un département, via l'API Découpage administratif :
+    {} si l'API n'est pas joignable."""
+    try:
+        res = requests.get(GEO_API_URL, params={"codeDepartement": dept, "fields": "nom,code"}, timeout=10)
+        res.raise_for_status()
+        return {c["code"]: c["nom"] for c in res.json()}
+    except requests.RequestException as e:
+        print(f"  warning: communes du département {dept} non récupérées ({e}) : villes non complétées")
+        return {}
+
+
+LINK_WORDS = r"(?:SUR|EN|LES?|LA|DE|DU|DES|AUX?)"
+
+
+def line_label(stop_id, name):
+    """"VILLE Arrêt" pour les noms de ligne : commune du code INSEE du stop_id ("FR:<insee>:..."), en
+    majuscules sans accent, + nom GTFS privé de la commune ou de son début s'il la répète ("Avranches - X",
+    "St-Malo X", "Fleury X" à Fleury-sur-Orne...). Nom GTFS inchangé si la commune est inconnue."""
+    insee = re.match(r"FR:(\d{5}):", stop_id)
+    ville = insee and communes(insee.group(1)[:2]).get(insee.group(1))
+    if not ville:
+        return name
+    ville = unaccent(ville).upper()
+    words = ["(?:STE?|SAINTE?)" if w in ("SAINT", "SAINTE") else re.escape(w) for w in ville.split("-")]
+    starts = ["[ -]".join(words)]
+    for n in range(len(words) - 1, 0, -1):
+        # début de la commune ("Fleury Mairie" à Fleury-sur-Orne), sauf "Saint" seul ou fini par une liaison
+        if re.fullmatch(LINK_WORDS, words[n - 1]) or (n == 1 and words[0].startswith("(?:")):
+            continue
+        # suivi d'une espace ou « : » (pas "CONDE-SUR-NOIREAU"), puis ni « / », ni liaison, ni la suite
+        # de la commune ("PACY S/ EURE", "Mont aux Malades", "NOTRE DAME D'ESTREES")
+        starts.append(rf"{'[ -]'.join(words[:n])}(?=[ :][ :-]*+(?!/|S/|D'|(?:{LINK_WORDS}|{words[n]})\b))")
+    prefix = re.match(rf"(?:{'|'.join(starts)})\b[ :-]*", unaccent(name), re.IGNORECASE)
+    rest = name[prefix.end():] if prefix else name
+    return f"{ville} {rest}" if rest else ville
+
+
+def master_endpoints_label(endpoints):
+    """Termini d'une ligne (route_master) à partir des (origine, terminus) de ses variantes, au format
+    Twisto : "A ↔ B", ou "A1 / A2 ↔ B" si plusieurs origines partagent le même terminus B."""
+    counts = Counter(name for pair in endpoints for name in pair)
+    hub = counts.most_common(1)[0][0]
+    others = list(dict.fromkeys(name for pair in endpoints for name in pair if name != hub))
+    return f"{' / '.join(others)} ↔ {hub}" if others else hub
+
+
+def stop_tags(stop, stop_id, network):
+    """Tags d'un quai tirés du GTFS."""
+    tags = {"public_transport": "platform", "highway": "bus_stop", "bus": "yes", "name": stop["stop_name"],
+            **network, "gtfs:stop_id": stop_id, "ref:FR:Atoumod": stop_id}
     if isinstance(stop["stop_code"], str):
         tags["ref"] = stop["stop_code"]
     if stop["wheelchair_boarding"] in ("1", "2"):
@@ -150,22 +232,39 @@ def stop_tags(stop, stop_id):
     return tags
 
 
+def add_tag(t, key, value):
+    """Ajoute une valeur à un tag sans écraser une valeur différente déjà posée par un autre réseau :
+    posée sur la 1re clé numérotée libre ("network:2", "ref:FR:Atoumod:2"...)."""
+    if key not in t:
+        t[key] = value
+    elif t[key] != value:
+        n = next(n for n in count(2) if t.get(f"{key}:{n}", value) == value)
+        t[f"{key}:{n}"] = value
+
+
 def enrich(new, obj, key, tags):
-    """Ajoute les tags Nomad à un objet OSM existant sans écraser ceux d'un autre réseau : les tags absents
-    sont ajoutés, réseau/exploitant/référence Atoumod sont complétés en liste « a;b »."""
+    """Complète un quai OSM existant avec les tags du GTFS/réseau sans écraser ceux d'un autre réseau
+    (voir add_tag), sauf name, remplacé par le nom officiel GTFS. Les tags network* d'un même réseau
+    prennent tous le même numéro ("network:2", "network:wikidata:2"...)."""
     o = new[key] = new.get(key) or copy.deepcopy(obj[key])
     t = o["tags"]
-    for group in (NETWORK, OPERATOR):
-        main = next(iter(group))
-        if t.get(main, group[main]) == group[main]:
-            t |= {k: v for k, v in group.items() if k not in t}
-        else:  # autre réseau / exploitant : on complète, sans wikipedia (une seule valeur possible)
-            for k, v in group.items():
-                if not k.endswith(":wikipedia") and v not in t.get(k, "").split(";"):
-                    t[k] = f"{t[k]};{v}" if k in t else v
-    if "ref:FR:Atoumod" in tags and tags["ref:FR:Atoumod"] not in t.get("ref:FR:Atoumod", "").split(";"):
-        t["ref:FR:Atoumod"] = ";".join(filter(None, [t.get("ref:FR:Atoumod"), tags["ref:FR:Atoumod"]]))
-    t |= {k: v for k, v in tags.items() if k not in t}
+    n = next(n for n in chain([""], (f":{i}" for i in count(2))) if t.get(f"network{n}", tags["network"]) == tags["network"])
+    for k, v in tags.items():
+        if k == "name":
+            t[k] = v
+        elif k.startswith("network"):
+            t[k + n] = v
+        else:
+            add_tag(t, k, v)
+
+
+def enrich_stop_position(new, obj, key, name):
+    """Complète a minima une stop_position OSM existante (bus=yes, name officiel GTFS), sans toucher à
+    ses autres tags."""
+    o = new[key] = new.get(key) or copy.deepcopy(obj[key])
+    o["tags"].setdefault("bus", "yes")
+    o["tags"]["name"] = name
+
 
 def place_stop(obj, osm, ways, stop, start):
     """(index de la voie, stop_position existante ou créée) du premier passage près de l'arrêt,
@@ -196,15 +295,31 @@ def place_stop(obj, osm, ways, stop, start):
     t = min(max(t, 1 / length), 1 - 1 / length) if length > 2 else 0.5  # pas collé à un nœud existant
     key = f"n-{next(new_ids)}"
     obj[key] = {"lat": a[0] + t * (b[0] - a[0]), "lon": a[1] + t * (b[1] - a[1]), "tags": {
-        "public_transport": "stop_position", "bus": "yes", "name": stop["short_name"], **NETWORK, **OPERATOR}}
+        "public_transport": "stop_position", "bus": "yes", "name": stop["stop_name"]}}
     if w not in obj.maps[0]:
         obj[w] = copy.deepcopy(osm[w])
     obj[w]["nodes"].insert(k + 1, key)
     return i, key
 
 
+def choose_platform(candidates, stop, obj, placed):
+    """Quai OSM candidat à droite de la voie (sens des nœuds autour de la stop_position placed = (voie,
+    nœud)) plutôt qu'en face, le plus proche de l'arrêt GTFS, ou de la stop_position s'ils sont
+    homonymes. None si aucun candidat."""
+    if placed:
+        way, key = placed
+        nodes = obj[way]["nodes"]
+        i = nodes.index(key)
+        pos = lambda n: (obj[n]["lat"], obj[n]["lon"])
+        a, b = pos(nodes[max(i - 1, 0)]), pos(nodes[min(i + 1, len(nodes) - 1)])
+        candidates = [c for c in candidates if right_of(c["pos"], a, b)] or candidates
+        if len({c["name"] for c in candidates}) == 1:
+            stop = pos(key)
+    return min(candidates, key=lambda c: dist(stop, c["pos"]), default=None)
+
+
 def write_osm(new, obj, path):
-    root = ET.Element("osm", version="0.6", generator="NOMAD_Automation", upload="true")
+    root = ET.Element("osm", version="0.6", generator="Atoumod_Automation", upload="true")
     keys = set(new) | {n for k in new if k[0] == "w" for n in obj[k]["nodes"]}
     for key in sorted(keys, key=lambda k: ("nwr".index(k[0]), k)):
         o = obj[key]
@@ -224,67 +339,99 @@ def write_osm(new, obj, path):
     ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
 
 
-def build_line(route, variants, osm, stops, platforms):
+def build_line(route, variants, osm, stops, platforms, network, path):
     ref = route["route_short_name"]
     new = {}  # objets créés ou modifiés pour cette ligne
     obj = ChainMap(new, osm)
-    platforms = dict(platforms)  # quais créés pour cette ligne seulement
-    common = {**NETWORK, **OPERATOR, "colour": f"#{route['route_color']}",
+    chosen = {}  # stop_id -> quai retenu pour cette ligne
+    common ={**network, "colour": f"#{route['route_color']}",
               "colour:text": f"#{route['route_text_color']}", f"gtfs:route_id:{GTFS_FEED}": route["route_id"]}
-    master_members, missing, gaps = [], 0, set()
+    master_members, endpoints, missing, gaps = [], [], 0, set()
     for v in variants:
         ways = [w for w in v["ways"] if w in osm]
         members, start = [], 0
         for stop_id in v["seq"]:
             s = stops.loc[stop_id]
-            if placed := place_stop(obj, osm, ways, s, start):
+            placed = place_stop(obj, osm, ways, s, start)
+            if placed:
                 start = placed[0]
                 if not placed[1].startswith("n-"):  # stop_position existante
-                    enrich(new, obj, placed[1], {"name": s["short_name"]})
+                    enrich_stop_position(new, obj, placed[1], s["stop_name"])
                 members.append((placed[1], "stop"))
             else:
                 missing += 1
-            if not platforms[stop_id]:
-                platforms[stop_id] = key = f"n-{next(new_ids)}"
-                new[key] = {"lat": s["lat"], "lon": s["lon"], "tags": stop_tags(s, stop_id)}
-            elif platforms[stop_id] in osm:  # quai existant : complété avec les données Nomad
-                enrich(new, obj, platforms[stop_id], stop_tags(s, stop_id))
-            members.append((platforms[stop_id], "platform"))
+            if stop_id not in chosen:
+                c = choose_platform(platforms[stop_id], (s["lat"], s["lon"]), obj,
+                                    placed and (ways[placed[0]], placed[1]))
+                chosen[stop_id] = c["id"] if c else f"n-{next(new_ids)}"
+                if not c:
+                    new[chosen[stop_id]] = {"lat": s["lat"], "lon": s["lon"], "tags": stop_tags(s, stop_id, network)}
+            if chosen[stop_id] in osm:  # quai existant : complété avec les données du réseau
+                enrich(new, obj, chosen[stop_id], stop_tags(s, stop_id, network))
+            members.append((chosen[stop_id], "platform"))
         members += [(w, "") for w in ways]
         gaps |= {(a, b) for a, b in zip(ways, ways[1:]) if not set(obj[a]["nodes"]) & set(obj[b]["nodes"])}
-        first, last = stops.at[v["seq"][0], "stop_name"], stops.at[v["seq"][-1], "stop_name"]
+        first, last = stops.loc[v["seq"][0]], stops.loc[v["seq"][-1]]
+        endpoints.append((first["label"], last["label"]))
         key = f"r-{next(new_ids)}"
         new[key] = {"members": members, "tags": {
-            "type": "route", "route": "bus", "ref": ref, "name": f"Bus {ref}: {first} => {last}", **common,
-            f"gtfs:trip_id:sample:{GTFS_FEED}": v["trip_id"], f"gtfs:shape_id:{GTFS_FEED}": f"NOMAD:{v['shape_id']}",
-            "ref_trips": v["trip_id"], "from": first, "to": last, "public_transport:version": "2"}}
+            "type": "route", "route": "bus", "ref": ref,
+            "name": f"Bus {ref}: {first['label']} → {last['label']}", **common,
+            f"gtfs:trip_id:sample:{GTFS_FEED}": v["trip_id"],
+            f"gtfs:shape_id:{GTFS_FEED}": f"{slug(network['network']).upper()}:{v['shape_id']}",
+            "ref_trips": v["trip_id"], "from": first["stop_name"], "to": last["stop_name"], "public_transport:version": "2"}}
         master_members.append((key, ""))
     new[f"r-{next(new_ids)}"] = {"members": master_members, "tags": {
-        "type": "route_master", "route_master": "bus", "ref": ref, "name": f"Bus {ref}", **common}}
-    write_osm(new, obj, OUTPUT_DIR / f"ligne_nomad_{ref}.osm")
+        "type": "route_master", "route_master": "bus", "ref": ref,
+        "name": f"Bus {ref}: {master_endpoints_label(endpoints)}", **common}}
+    write_osm(new, obj, path)
 
     created = Counter(o["tags"].get("public_transport") for k, o in new.items() if k.startswith("n-"))
-    print(f"✅ ligne {ref} : {len(variants)} variante(s), {created['stop_position']} stop_position et "
-          f"{created['platform']} quai(s) créés"
-          + (f", ⚠️  {missing} arrêt(s) à plus de {MAX_STOP_POSITION_M} m du tracé" if missing else "")
-          + (f", ⚠️  {len(gaps)} trou(s) entre voies : " + ", ".join(f"{a} → {b}" for a, b in sorted(gaps))
-             if gaps else ""))
+    print(f"ligne {ref} : {len(variants)} variante(s), {created['stop_position']} stop_position, "
+          f"{created['platform']} quai(s)"
+          + (f", warning: {missing} arrêt(s) à plus de {MAX_STOP_POSITION_M} m du tracé" if missing else "")
+          + (f", warning: {len(gaps)} trou(s) entre voies" if gaps else ""))
 
 
 if __name__ == "__main__":
-    routes, trips, stops, stop_times, shapes = (pd.read_csv(f"{GTFS_DIR}/{name}.txt", encoding="utf-8-sig", dtype=str)
-                                                for name in ("routes", "trips", "stops", "stop_times", "shapes"))
+    parser = argparse.ArgumentParser(description="Génère un .osm PTv2 par ligne à partir du GTFS Atoumod.")
+    parser.add_argument("refs", nargs="*", help="numéros de ligne à générer (défaut : toutes)")
+    parser.add_argument("-r", "--reseau", help="ne générer que les lignes de ce réseau (ex. Nomad, Twisto)")
+    args = parser.parse_args()
+
+    agency, routes, trips, stops, stop_times, shapes = (
+        pd.read_csv(f"{GTFS_DIR}/{name}.txt", encoding="utf-8-sig", dtype=str)
+        for name in ("agency", "routes", "trips", "stops", "stop_times", "shapes"))
+    networks = agency_networks(agency)
+
+    routes = routes[routes["route_type"] == BUS_ROUTE_TYPE]
+    if args.reseau:
+        wanted = args.reseau.strip().lower()
+        routes = routes[routes["agency_id"].map(lambda a: networks[a]["network"].lower() == wanted)]
+        if routes.empty:
+            sys.exit(f"Aucune ligne de bus pour le réseau « {args.reseau} ». Réseaux disponibles : "
+                      + ", ".join(sorted({n["network"] for n in networks.values()})))
+    if args.refs:
+        routes = routes[routes["route_short_name"].isin(args.refs)]
+    routes = routes.sort_values(  # ordre lisible dans les logs : numérique si possible, sinon alphabétique
+        "route_short_name", key=lambda s: s.map(lambda r: (0, int(r)) if r.isdigit() else (1, r)))
+
+    # on ne garde que les arrêts effectivement utilisés par les lignes retenues : plus rapide sur un
+    # sous-ensemble (--reseau, numéros de ligne) que sur tout le GTFS régional
+    trips = trips[trips["route_id"].isin(routes["route_id"])]
     shapes["shape_pt_sequence"] = shapes["shape_pt_sequence"].astype(int)
     shapes = shapes.sort_values("shape_pt_sequence").groupby("shape_id")
+    stop_times = stop_times[stop_times["trip_id"].isin(trips["trip_id"])]
     stop_times["stop_sequence"] = stop_times["stop_sequence"].astype(int)
     trips["stop_seq"] = trips["trip_id"].map(
         stop_times.sort_values("stop_sequence").groupby("trip_id")["stop_id"].agg(tuple))
+
+    used_stops = {s for seq in trips["stop_seq"].dropna() for s in seq}
+    stops = stops[stops["stop_id"].isin(used_stops)]
     platforms = match_stops(stops)
     stops = stops.set_index("stop_id")
     stops["lat"], stops["lon"] = stops["stop_lat"].astype(float), stops["stop_lon"].astype(float)
-    stops["short_name"] = stops["stop_name"].str.split(" - ").str[-1]
-    if len(sys.argv) > 1:
-        routes = routes[routes["route_short_name"].isin(sys.argv[1:])]
+    stops["label"] = [line_label(i, n) for i, n in zip(stops.index, stops["stop_name"])]
 
     try:
         requests.get(f"{VALHALLA_URL}/status", timeout=5)
@@ -300,13 +447,22 @@ if __name__ == "__main__":
                 variants.append({"seq": seq, "shape_id": shape_id, "trip_id": trip_id,
                                  "ways": map_match(shapes.get_group(shape_id))})
             except (RuntimeError, requests.RequestException) as e:
-                print(f"  ⚠️  ligne {route['route_short_name']}, shape {shape_id} ignorée : {e}")
+                print(f"  warning: ligne {route['route_short_name']}, shape {shape_id} ignorée : {e}")
+        if not variants:
+            print(f"  warning: ligne {route['route_short_name']} ignorée : aucune variante map-matchée")
+            continue
         lines.append((route, variants))
 
     print("Lecture des voies et des quais dans le PBF...")
     osm = read_ways({w for _, variants in lines for v in variants for w in v["ways"]}
-                    | {platforms[s] for _, variants in lines for v in variants for s in v["seq"] if platforms[s]})
+                    | {c["id"] for _, variants in lines for v in variants for s in v["seq"] for c in platforms[s]})
 
     OUTPUT_DIR.mkdir(exist_ok=True)
+    used_names = Counter()
     for route, variants in lines:
-        build_line(route, variants, osm, stops, platforms)
+        network = networks[route["agency_id"]]
+        name = f"{slug(network['network'])}_{slug(route['route_short_name'])}"
+        used_names[name] += 1
+        if used_names[name] > 1:  # même réseau, même ref (ex. variantes scolaires) : on distingue les fichiers
+            name = f"{name}-{used_names[name]}"
+        build_line(route, variants, osm, stops, platforms, network, OUTPUT_DIR / f"{name}.osm")
