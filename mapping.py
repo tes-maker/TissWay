@@ -1,9 +1,10 @@
-"""Génère un fichier .osm PTv2 par ligne de bus/car du GTFS régional Atoumod (tous réseaux : Nomad,
-Twisto, Astuce...), à relire dans JOSM (avec PT Assistant).
+"""Génère les relations PTv2 des lignes de bus/car du GTFS régional Atoumod (tous réseaux : Nomad,
+Twisto, Astuce...) dans un seul fichier .osm par exécution, à relire dans JOSM (avec PT Assistant).
 
 Pour chaque variante : la stop_position (existante ou créée sur la voie) et le quai de chaque arrêt,
-puis les voies map-matchées par Valhalla. Les voies ne sont pas découpées et les trous ne sont pas
-comblés : c'est à faire dans JOSM, qui met à jour les relations des voies découpées.
+puis les voies map-matchées par Valhalla. Seuls les ronds-points d'un seul tenant sont découpés (une
+fois pour toutes les lignes du fichier, relations existantes mises à jour) ; les autres voies ne sont
+pas découpées et les trous ne sont pas comblés : c'est à faire dans JOSM.
 
 Usage : python mapping.py [-r RÉSEAU] [numéros de ligne...]   (sans argument : toutes les lignes, tous réseaux)
 """
@@ -34,6 +35,7 @@ OSM_STOPS_CACHE = "osm_bus_stops.geojsonseq"
 OUTPUT_DIR = Path("output_osm")
 MAX_STOP_DISTANCE_M = 20  # arrêt GTFS -> quai OSM existant
 MAX_STOP_POSITION_M = 40  # arrêt GTFS -> voie empruntée (stop_position)
+MAX_OPPOSITE_STOP_M = 30  # arrêt GTFS -> arrêt GTFS d'en face (même arrêt, autre sens)
 MAX_TRACE_M = 150_000  # Valhalla refuse les traces de plus de 200 km : on découpe au-delà
 MIN_VARIANT_SHARE = 0.10
 BUS_ROUTE_TYPE = "3"  # GTFS route_type : on ignore train/tram/ferry, hors périmètre (voies + Valhalla costing bus)
@@ -74,7 +76,9 @@ def right_of(p, a, b):
 # --- Données GTFS et OSM ---
 
 def match_stops(stops):
-    """stop_id GTFS -> quais OSM candidats à moins de 20 m : [{"id": "n123"/"w456", "pos": (lat, lon), "name"}]."""
+    """Pour tous les arrêts GTFS (pas seulement ceux des lignes retenues) : stop_id -> quais OSM candidats à
+    moins de 20 m [{"id": "n123"/"w456", "pos": (lat, lon), "name"}], quai candidat -> stop_id à moins de
+    20 m, et stop_id -> autres stop_id à moins de MAX_OPPOSITE_STOP_M (arrêt d'en face)."""
     if not Path(OSM_STOPS_CACHE).is_file():  # arrêts de bus du PBF, extraits une fois avec osmium
         subprocess.run(["osmium", "tags-filter", PBF_PATH, "n/highway=bus_stop",
                         "nw/public_transport=platform", "-o", "stops.pbf", "--overwrite"], check=True)
@@ -88,27 +92,33 @@ def match_stops(stops):
     osm = osm.assign(lat=ll.y, lon=ll.x)
     gdf = gpd.GeoDataFrame(stops[["stop_id"]], crs="EPSG:4326", geometry=gpd.points_from_xy(
         stops["stop_lon"].astype(float), stops["stop_lat"].astype(float))).to_crs(epsg=2154)
-    platforms = {s: [] for s in stops["stop_id"]}
+    platforms, platform_stops = {s: [] for s in stops["stop_id"]}, {}
     for r in gpd.sjoin(gdf, osm, predicate="dwithin", distance=MAX_STOP_DISTANCE_M).itertuples():
         platforms[r.stop_id].append({"id": r.id, "pos": (r.lat, r.lon), "name": r.name})
-    return platforms
+        platform_stops.setdefault(r.id, []).append(r.stop_id)
+    neighbours = {s: [] for s in stops["stop_id"]}
+    for r in gpd.sjoin(gdf, gdf, predicate="dwithin", distance=MAX_OPPOSITE_STOP_M).itertuples():
+        if r.stop_id_left != r.stop_id_right:
+            neighbours[r.stop_id_left].append(r.stop_id_right)
+    return platforms, platform_stops, neighbours
 
 
 def unescape(s):
     return re.sub(r"%([0-9a-fA-F]+)%", lambda m: chr(int(m.group(1), 16)), s)
 
 
-def read_ways(ids):
-    """Voies du PBF et leurs nœuds, indexés "n123"/"w123"."""
+def read_osm(command, ids):
+    """Objets du PBF renvoyés par la commande osmium (getid, getparents) pour ces ids, indexés
+    "n123"/"w123"/"r123"."""
     objects = {}
     with tempfile.TemporaryDirectory() as tmp:
         Path(tmp, "ids.txt").write_text("\n".join(ids))
         out = Path(tmp, "out.opl")
         # code 1 = certains ids absents de l'extrait (voisines hors Normandie) : sans importance
-        res = subprocess.run(["osmium", "getid", "-r", PBF_PATH, "-i", Path(tmp, "ids.txt"), "-f", "opl", "-o", out],
+        res = subprocess.run(["osmium", *command, PBF_PATH, "-i", Path(tmp, "ids.txt"), "-f", "opl", "-o", out],
                              stderr=subprocess.PIPE, text=True)
         if res.returncode > 1:
-            raise RuntimeError(f"échec de osmium getid : {res.stderr}")
+            raise RuntimeError(f"échec de osmium {command[0]} : {res.stderr}")
         for line in out.read_text().splitlines():
             key, *rest = line.split(" ")
             f = {x[0]: x[1:] for x in rest}
@@ -116,9 +126,22 @@ def read_ways(ids):
                 map(unescape, kv.split("=", 1)) for kv in f["T"].split(",") if kv)}
             if key[0] == "n":
                 obj["lat"], obj["lon"] = float(f["y"]), float(f["x"])
-            else:
+            elif key[0] == "w":
                 obj["nodes"] = f["N"].split(",") if f["N"] else []
+            else:
+                obj["members"] = [(ref, unescape(role)) for ref, _, role in
+                                  (m.partition("@") for m in f["M"].split(",") if m)]
     return objects
+
+
+def read_ways(ids):
+    """Voies du PBF et leurs nœuds, indexés "n123"/"w123"."""
+    return read_osm(["getid", "-r"], ids)
+
+
+def parent_relations(ids):
+    """Relations du PBF qui contiennent ces objets."""
+    return {k: o for k, o in read_osm(["getparents"], ids).items() if k[0] == "r"}
 
 
 # --- Variantes et map-matching ---
@@ -153,6 +176,84 @@ def map_match(shape_pts):
             raise RuntimeError(res["error"])
         ways += [f"w{e['way_id']}" for e in res["edges"]]
     return [w for w, _ in groupby(ways)]
+
+
+# --- Découpage des ronds-points ---
+
+def is_roundabout(o):
+    """Rond-point d'un seul tenant (voie fermée) : une ligne qui l'emprunte en ferait tout le tour."""
+    nodes = o.get("nodes", [])
+    return (o["tags"].get("junction") in ("roundabout", "circular")
+            and len(nodes) > 3 and nodes[0] == nodes[-1])
+
+
+def passages(ways, obj, i):
+    """(entrée, sortie) de la variante sur la voie ways[i] : nœud partagé avec la voie précédente /
+    suivante, None en bout de variante ou s'il y a un trou."""
+    shared = lambda j: next(iter(set(obj[ways[j]]["nodes"]) & set(obj[ways[i]]["nodes"])), None)
+    return shared(i - 1) if i else None, shared(i + 1) if i + 1 < len(ways) else None
+
+
+def traversed(parts, obj, entry, exit):
+    """Morceaux d'un rond-point découpé (dans le sens giratoire) parcourus de entry à exit (tour complet si
+    entry == exit, un seul morceau si l'une des deux est inconnue)."""
+    if entry is None and exit is None:
+        return parts
+    starts = [obj[p]["nodes"][0] for p in parts]
+    ends = [obj[p]["nodes"][-1] for p in parts]
+    k = starts.index(entry) if entry in starts else ends.index(exit) if exit in ends else 0
+    out = []
+    for step in range(len(parts)):
+        out.append(parts[(k + step) % len(parts)])
+        if exit is None or ends[(k + step) % len(parts)] == exit:
+            break
+    return out
+
+
+def split_roundabouts(variants, osm, new):
+    """Découpe une seule fois, pour toutes les variantes, les ronds-points d'un seul tenant à chaque entrée et
+    sortie des lignes, et ne garde dans chaque variante que les morceaux parcourus (plutôt que le tour
+    complet). Le morceau le plus long garde l'id du rond-point. Les relations OSM existantes qui le
+    contiennent reçoivent tous les morceaux, dans l'ordre du sens giratoire, pour ne pas y créer de trou.
+    Renvoie le nombre de ronds-points découpés."""
+    cuts = {}  # rond-point -> nœuds de coupe
+    for v in variants:
+        for i, w in enumerate(v["ways"]):
+            if is_roundabout(osm[w]):
+                cuts.setdefault(w, set()).update(n for n in passages(v["ways"], osm, i) if n)
+    parts = {}  # rond-point -> ids des morceaux dans le sens giratoire
+    for w, nodes in cuts.items():
+        ring = osm[w]["nodes"][:-1]
+        idx = sorted({ring.index(n) for n in nodes})
+        if len(idx) < 2:  # une seule coupe : rien à découper
+            continue
+        arcs = [ring[i:j + 1] if j > i else ring[i:] + ring[:j + 1] for i, j in zip(idx, idx[1:] + idx[:1])]
+        keep = max(range(len(arcs)), key=lambda k: len(arcs[k]))
+        parts[w] = [w if k == keep else f"w-{next(new_ids)}" for k in range(len(arcs))]
+        for p, arc in zip(parts[w], arcs):
+            new[p] = {**({"version": osm[w]["version"]} if p == w else {}),
+                      "nodes": arc, "tags": dict(osm[w]["tags"])}
+    obj = ChainMap(new, osm)
+
+    for key, rel in parent_relations(parts).items():
+        members = []
+        for ref, role in rel["members"]:
+            if ref not in parts:
+                members.append((ref, role))
+                continue
+            # on commence par le morceau qui part de la voie précédente de la relation, si elle est connue
+            prev = members[-1][0] if members else None
+            prev_nodes = set(obj[prev]["nodes"]) if prev in obj and "nodes" in obj[prev] else set()
+            k = next((k for k, p in enumerate(parts[ref]) if obj[p]["nodes"][0] in prev_nodes), 0)
+            members += [(p, role) for p in parts[ref][k:] + parts[ref][:k]]
+        new[key] = {**rel, "members": members}
+
+    for v in variants:
+        ways = []
+        for i, w in enumerate(v["ways"]):
+            ways += traversed(parts[w], obj, *passages(v["ways"], osm, i)) if w in parts else [w]
+        v["ways"] = ways
+    return len(parts)
 
 
 # --- Construction d'une ligne ---
@@ -302,20 +403,52 @@ def place_stop(obj, osm, ways, stop, start):
     return i, key
 
 
+def direction(obj, placed):
+    """Segment (a, b) de la voie autour de la stop_position placed = (voie, nœud), dans le sens de la ligne."""
+    way, key = placed
+    nodes = obj[way]["nodes"]
+    i = nodes.index(key)
+    pos = lambda n: (obj[n]["lat"], obj[n]["lon"])
+    return pos(nodes[max(i - 1, 0)]), pos(nodes[min(i + 1, len(nodes) - 1)])
+
+
 def choose_platform(candidates, stop, obj, placed):
     """Quai OSM candidat à droite de la voie (sens des nœuds autour de la stop_position placed = (voie,
     nœud)) plutôt qu'en face, le plus proche de l'arrêt GTFS, ou de la stop_position s'ils sont
     homonymes. None si aucun candidat."""
     if placed:
-        way, key = placed
-        nodes = obj[way]["nodes"]
-        i = nodes.index(key)
-        pos = lambda n: (obj[n]["lat"], obj[n]["lon"])
-        a, b = pos(nodes[max(i - 1, 0)]), pos(nodes[min(i + 1, len(nodes) - 1)])
+        a, b = direction(obj, placed)
         candidates = [c for c in candidates if right_of(c["pos"], a, b)] or candidates
         if len({c["name"] for c in candidates}) == 1:
-            stop = pos(key)
+            stop = (obj[placed[1]]["lat"], obj[placed[1]]["lon"])
     return min(candidates, key=lambda c: dist(stop, c["pos"]), default=None)
+
+
+def fix_side(stop_id, platform, obj, placed, all_stops, platforms, platform_stops, neighbours):
+    """(quai, stop_id GTFS dont il prend les données). Si le GTFS rattache la ligne à l'arrêt de gauche
+    (erreur de leur côté : la ligne n'est pas rattachée au bon arrêt), on prend l'arrêt GTFS du même
+    réseau situé à droite :
+    - quai OSM retenu à droite : données de l'arrêt GTFS de droite le plus proche du quai ;
+    - sinon, arrêt GTFS de droite le plus proche à moins de MAX_OPPOSITE_STOP_M : son quai OSM à droite
+      s'il en a un, ou None (quai à créer à sa position).
+    (platform, stop_id) inchangés si l'arrêt est déjà à droite ou s'il n'y a pas d'arrêt GTFS à droite."""
+    if not placed:
+        return platform, stop_id
+    a, b = direction(obj, placed)
+    pos = lambda sid: (all_stops.at[sid, "lat"], all_stops.at[sid, "lon"])
+    if right_of(pos(stop_id), a, b):
+        return platform, stop_id
+    network = stop_id.rsplit(":", 1)[-1]  # "ATOUMOD040"
+    right = lambda ids: [sid for sid in ids
+                         if sid != stop_id and sid.rsplit(":", 1)[-1] == network and right_of(pos(sid), a, b)]
+    if platform and right_of(platform["pos"], a, b):
+        return platform, min(right(platform_stops.get(platform["id"], [])),
+                             key=lambda sid: dist(pos(sid), platform["pos"]), default=stop_id)
+    opposite = min(right(neighbours[stop_id]), key=lambda sid: dist(pos(sid), pos(stop_id)), default=None)
+    if opposite is None:
+        return platform, stop_id
+    candidates = [c for c in platforms[opposite] if right_of(c["pos"], a, b)]
+    return min(candidates, key=lambda c: dist(pos(opposite), c["pos"]), default=None), opposite
 
 
 def write_osm(new, obj, path):
@@ -339,16 +472,18 @@ def write_osm(new, obj, path):
     ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
 
 
-def build_line(route, variants, osm, stops, platforms, network, path):
+def build_line(route, variants, osm, new, stops, all_stops, platforms, platform_stops, neighbours, network):
+    """Ajoute à new (objets créés ou modifiés, communs à toutes les lignes du fichier) les relations de la
+    ligne, ses stop_positions et ses quais."""
     ref = route["route_short_name"]
-    new = {}  # objets créés ou modifiés pour cette ligne
+    before = set(new)
     obj = ChainMap(new, osm)
-    chosen = {}  # stop_id -> quai retenu pour cette ligne
+    chosen = {}  # stop_id -> (quai retenu pour cette ligne, stop_id GTFS dont il prend les données)
     common ={**network, "colour": f"#{route['route_color']}",
               "colour:text": f"#{route['route_text_color']}", f"gtfs:route_id:{GTFS_FEED}": route["route_id"]}
-    master_members, endpoints, missing, gaps = [], [], 0, set()
+    master_members, endpoints, missing, gaps, swapped = [], [], 0, set(), []
     for v in variants:
-        ways = [w for w in v["ways"] if w in osm]
+        ways = v["ways"]
         members, start = [], 0
         for stop_id in v["seq"]:
             s = stops.loc[stop_id]
@@ -361,14 +496,19 @@ def build_line(route, variants, osm, stops, platforms, network, path):
             else:
                 missing += 1
             if stop_id not in chosen:
-                c = choose_platform(platforms[stop_id], (s["lat"], s["lon"]), obj,
-                                    placed and (ways[placed[0]], placed[1]))
-                chosen[stop_id] = c["id"] if c else f"n-{next(new_ids)}"
+                around = placed and (ways[placed[0]], placed[1])
+                c = choose_platform(platforms[stop_id], (s["lat"], s["lon"]), obj, around)
+                c, data_id = fix_side(stop_id, c, obj, around, all_stops, platforms, platform_stops, neighbours)
+                if data_id != stop_id:
+                    swapped.append(f"{s['stop_name']} ({stop_id} -> {data_id}{', quai créé' if not c else ''})")
+                chosen[stop_id] = (c["id"] if c else f"n-{next(new_ids)}", data_id)
                 if not c:
-                    new[chosen[stop_id]] = {"lat": s["lat"], "lon": s["lon"], "tags": stop_tags(s, stop_id, network)}
-            if chosen[stop_id] in osm:  # quai existant : complété avec les données du réseau
-                enrich(new, obj, chosen[stop_id], stop_tags(s, stop_id, network))
-            members.append((chosen[stop_id], "platform"))
+                    d = all_stops.loc[data_id]
+                    new[chosen[stop_id][0]] = {"lat": d["lat"], "lon": d["lon"], "tags": stop_tags(d, data_id, network)}
+            platform, data_id = chosen[stop_id]
+            if platform in osm:  # quai existant : complété avec les données du réseau
+                enrich(new, obj, platform, stop_tags(all_stops.loc[data_id], data_id, network))
+            members.append((platform, "platform"))
         members += [(w, "") for w in ways]
         gaps |= {(a, b) for a, b in zip(ways, ways[1:]) if not set(obj[a]["nodes"]) & set(obj[b]["nodes"])}
         first, last = stops.loc[v["seq"][0]], stops.loc[v["seq"][-1]]
@@ -384,13 +524,15 @@ def build_line(route, variants, osm, stops, platforms, network, path):
     new[f"r-{next(new_ids)}"] = {"members": master_members, "tags": {
         "type": "route_master", "route_master": "bus", "ref": ref,
         "name": f"Bus {ref}: {master_endpoints_label(endpoints)}", **common}}
-    write_osm(new, obj, path)
 
-    created = Counter(o["tags"].get("public_transport") for k, o in new.items() if k.startswith("n-"))
+    created = Counter(o["tags"].get("public_transport") for k, o in new.items()
+                      if k.startswith("n-") and k not in before)
     print(f"ligne {ref} : {len(variants)} variante(s), {created['stop_position']} stop_position, "
           f"{created['platform']} quai(s)"
           + (f", warning: {missing} arrêt(s) à plus de {MAX_STOP_POSITION_M} m du tracé" if missing else "")
           + (f", warning: {len(gaps)} trou(s) entre voies" if gaps else ""))
+    for x in swapped:
+        print(f"  arrêt GTFS du mauvais côté, données de l'arrêt d'en face : {x}")
 
 
 if __name__ == "__main__":
@@ -427,9 +569,12 @@ if __name__ == "__main__":
         stop_times.sort_values("stop_sequence").groupby("trip_id")["stop_id"].agg(tuple))
 
     used_stops = {s for seq in trips["stop_seq"].dropna() for s in seq}
+    all_stops = stops
+    platforms, platform_stops, neighbours = match_stops(all_stops)
     stops = stops[stops["stop_id"].isin(used_stops)]
-    platforms = match_stops(stops)
     stops = stops.set_index("stop_id")
+    all_stops = all_stops.set_index("stop_id")
+    all_stops["lat"], all_stops["lon"] = all_stops["stop_lat"].astype(float), all_stops["stop_lon"].astype(float)
     stops["lat"], stops["lon"] = stops["stop_lat"].astype(float), stops["stop_lon"].astype(float)
     stops["label"] = [line_label(i, n) for i, n in zip(stops.index, stops["stop_name"])]
 
@@ -455,14 +600,22 @@ if __name__ == "__main__":
 
     print("Lecture des voies et des quais dans le PBF...")
     osm = read_ways({w for _, variants in lines for v in variants for w in v["ways"]}
-                    | {c["id"] for _, variants in lines for v in variants for s in v["seq"] for c in platforms[s]})
+                    | {c["id"] for _, variants in lines for v in variants for s in v["seq"]
+                       for n in [s, *neighbours[s]] for c in platforms[n]})
+
+    variants = [v for _, vs in lines for v in vs]
+    for v in variants:  # voies absentes de l'extrait (voisines hors Normandie) ignorées
+        v["ways"] = [w for w, _ in groupby(w for w in v["ways"] if w in osm)]
+    new = {}  # objets créés ou modifiés, communs à toutes les lignes : un seul fichier pour éviter les
+    # conflits entre lignes (ronds-points découpés, quais et stop_positions partagés)
+    print(f"{split_roundabouts(variants, osm, new)} rond(s)-point(s) découpé(s)")
+
+    for route, variants in lines:
+        build_line(route, variants, osm, new, stops, all_stops, platforms, platform_stops, neighbours,
+                   networks[route["agency_id"]])
 
     OUTPUT_DIR.mkdir(exist_ok=True)
-    used_names = Counter()
-    for route, variants in lines:
-        network = networks[route["agency_id"]]
-        name = f"{slug(network['network'])}_{slug(route['route_short_name'])}"
-        used_names[name] += 1
-        if used_names[name] > 1:  # même réseau, même ref (ex. variantes scolaires) : on distingue les fichiers
-            name = f"{name}-{used_names[name]}"
-        build_line(route, variants, osm, stops, platforms, network, OUTPUT_DIR / f"{name}.osm")
+    name = slug(args.reseau) if args.reseau else "atoumod"
+    path = OUTPUT_DIR / f"{'_'.join([name, *map(slug, args.refs)])}.osm"
+    write_osm(new, ChainMap(new, osm), path)
+    print(f"-> {path}")

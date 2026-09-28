@@ -1,7 +1,7 @@
 # Atoumod → OSM
 
-Génère un fichier `.osm` (PTv2) par ligne de bus/car de toute la billettique régionale Atoumod (Nomad, Twisto,
-Astuce, Ficibus...) à partir du GTFS, à relire et envoyer depuis JOSM.
+Génère les relations PTv2 des lignes de bus/car de toute la billettique régionale Atoumod (Nomad, Twisto,
+Astuce, Ficibus...) à partir du GTFS, dans un fichier `.osm` à relire et envoyer depuis JOSM.
 
 Le réseau (`network`, + `network:wikidata` quand vérifié sur OSM) est déduit de l'`agency` GTFS de chaque
 ligne. Aucun `operator` n'est mis : l'exploitant réel d'une ligne (souvent un sous-traitant) n'est pas fiable
@@ -66,7 +66,15 @@ python mapping.py -r Twisto 1 2      # les lignes 1 et 2 du réseau Twisto
 Le nom du réseau (`-r`/`--reseau`) est celui du tag `network` généré (voir plus bas), insensible à la casse
 (ex. `nomad`, `Twisto`, `Astuce`). En cas d'erreur, le script liste les réseaux disponibles dans le GTFS.
 
-Les fichiers sont écrits dans `output_osm/<réseau>_<ligne>.osm` (ex. `nomad_101.osm`, `twisto_1.osm`).
+Toutes les lignes d'une exécution sont écrites dans un seul fichier : `output_osm/<réseau>[_<lignes>].osm`
+(ex. `nomad.osm`, `nomad_301_305.osm`, `atoumod.osm` sans `-r`). Un seul fichier évite les conflits entre
+lignes sur les objets partagés (ronds-points découpés, quais, stop_positions) : l'envoyer en une fois.
+
+Les ronds-points d'un seul tenant (voie fermée `junction=roundabout`) sont découpés à chaque entrée/sortie
+des lignes, pour qu'une ligne ne garde que les morceaux qu'elle parcourt au lieu du tour complet. Le morceau
+le plus long garde l'id d'origine ; les relations OSM existantes qui contenaient le rond-point (autres
+lignes, itinéraires vélo, associatedStreet...) reçoivent tous les morceaux, dans le sens giratoire, pour ne
+pas y créer de trou.
 
 Au premier lancement, les arrêts OSM existants sont extraits dans `osm_bus_stops.geojsonseq`. Supprimer ce
 fichier après une mise à jour de `normandy-latest.osm.pbf` pour le régénérer.
@@ -94,7 +102,7 @@ principale absente. À corriger à la main dans JOSM si besoin pour ces réseaux
 
 ## 4. Relecture dans JOSM
 
-1. Ouvrir `output_osm/<réseau>_<ligne>.osm` (avec le greffon **PT Assistant**).
+1. Ouvrir `output_osm/<réseau>[_<lignes>].osm` (avec le greffon **PT Assistant**).
 2. Télécharger les données autour de la ligne pour avoir le contexte.
 3. Corriger les signalements : trous entre voies, voies à découper aux extrémités, arrêts mal placés,
    quais existants complétés (s'il appartient déjà à un autre réseau, le nouveau est ajouté en `network:2`, `network:wikidata:2`,
