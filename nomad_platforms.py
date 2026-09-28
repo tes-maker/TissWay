@@ -8,14 +8,15 @@ existantes) et wheelchair / bus s'ils manquent. Le name existant n'est pas modif
 Usage : python nomad_platforms.py   ->   output_osm/nomad_platforms.osm (+ nomad_platforms_non_trouves.csv)
 """
 
-import subprocess
 from collections import ChainMap
-from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
 
-from mapping import BUS_ROUTE_TYPE, GTFS_DIR, OSM_STOPS_CACHE, OUTPUT_DIR, PBF_PATH, read_ways, write_osm
+from atoumod.config import BUS_ROUTE_TYPE, GTFS_DIR, OUTPUT_DIR
+from atoumod.gtfs import ref_sort_key
+from atoumod.osm import read_ways, write_osm
+from atoumod.stops import osm_stops_cache
 
 NOMAD_AGENCY = "ATOUMOD040:Network:040:LOC"  # Nomad Car (Région Normandie)
 FEED = "FR-NOR-Nomad"  # suffixe des tags gtfs:*, comme FR-NOR-Nomad50 / FR-NOR-Nomad61 déjà sur OSM
@@ -47,13 +48,7 @@ def nomad_stops():
 
 def osm_platforms():
     """Quais de bus OSM (nœuds et voies) du PBF, en Lambert 93."""
-    if not Path(OSM_STOPS_CACHE).is_file():  # même cache que mapping.py
-        subprocess.run(["osmium", "tags-filter", PBF_PATH, "n/highway=bus_stop",
-                        "nw/public_transport=platform", "-o", "stops.pbf", "--overwrite"], check=True)
-        subprocess.run(["osmium", "export", "stops.pbf", "-f", "geojsonseq", "--add-unique-id=type_id",
-                        "-o", OSM_STOPS_CACHE, "--overwrite"], check=True)
-        Path("stops.pbf").unlink()
-    osm = gpd.read_file(OSM_STOPS_CACHE).to_crs(epsg=2154)
+    osm = gpd.read_file(osm_stops_cache()).to_crs(epsg=2154)  # même cache que mapping.py
     osm["geometry"] = osm.geometry.centroid
     pt = osm.get("public_transport", pd.Series(index=osm.index, dtype=str))
     keep = osm["id"].str[0].isin(["n", "w"]) & (pt != "stop_position")
@@ -80,7 +75,7 @@ def nomad_tags(tags, stop):
     t[f"gtfs:stop_id:{FEED}"] = stop["stop_id"]
     t[f"gtfs:stop_name:{FEED}"] = stop["stop_name"]
     refs = {r for r in t.get("route_ref", "").split(";") if r} | stop["route_ref"]
-    t["route_ref"] = ";".join(sorted(refs, key=lambda r: (0, int(r)) if r.isdigit() else (1, r)))
+    t["route_ref"] = ";".join(sorted(refs, key=ref_sort_key))
     t.setdefault("bus", "yes")
     if stop["wheelchair_boarding"] in WHEELCHAIR:
         t.setdefault("wheelchair", WHEELCHAIR[stop["wheelchair_boarding"]])
@@ -95,22 +90,22 @@ if __name__ == "__main__":
     matches = nearest_pairs(stops, platforms)
 
     osm = read_ways({osm_id for osm_id, _ in matches.values()})
-    new = {}
+    obj = ChainMap({}, osm)  # quais modifiés au-dessus des objets du PBF (voir atoumod.osm)
     for _, stop in stops[stops["stop_id"].isin(matches)].iterrows():
         osm_id = matches[stop["stop_id"]][0]
         if osm_id not in osm:  # absent du PBF (ne devrait pas arriver)
             continue
         tags = nomad_tags(osm[osm_id]["tags"], stop)
         if tags != osm[osm_id]["tags"]:
-            new[osm_id] = {**osm[osm_id], "tags": tags}
+            obj[osm_id] = {**osm[osm_id], "tags": tags}
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     out = OUTPUT_DIR / "nomad_platforms.osm"
-    write_osm(new, ChainMap(new, osm), out)
+    write_osm(obj, out)
 
     missing = stops[~stops["stop_id"].isin(matches)]
     missing[["stop_id", "stop_code", "stop_name", "stop_lat", "stop_lon"]].to_csv(
         OUTPUT_DIR / "nomad_platforms_non_trouves.csv", index=False)
     print(f"{len(stops)} arrêts Nomad : {len(matches)} associés à un quai OSM (<= {MAX_DISTANCE_M} m), "
-          f"{len(new)} quai(s) modifié(s) -> {out}")
+          f"{len(obj.maps[0])} quai(s) modifié(s) -> {out}")
     print(f"{len(missing)} arrêt(s) sans quai OSM proche -> {OUTPUT_DIR / 'nomad_platforms_non_trouves.csv'}")

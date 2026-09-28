@@ -12,6 +12,7 @@ dans le GTFS et n'est donc pas inventé — à compléter à la main dans JOSM s
 ```bash
 sudo apt install osmium-tool docker.io
 pip install geopandas pandas requests
+pip install pytest   # pour les tests (facultatif)
 ```
 
 ## 1. Données
@@ -61,7 +62,10 @@ python mapping.py                    # toutes les lignes, tous réseaux
 python mapping.py 301 305            # seulement certains numéros de ligne (tous réseaux confondus)
 python mapping.py -r Twisto          # seulement les lignes du réseau Twisto
 python mapping.py -r Twisto 1 2      # les lignes 1 et 2 du réseau Twisto
+python mapping.py -r nomad -l 301,305   # idem avec l'option -l/--ligne (espaces ou virgules)
 ```
+
+Un numéro de ligne inconnu (sur le réseau choisi) arrête le script en listant les lignes disponibles.
 
 Le nom du réseau (`-r`/`--reseau`) est celui du tag `network` généré (voir plus bas), insensible à la casse
 (ex. `nomad`, `Twisto`, `Astuce`). En cas d'erreur, le script liste les réseaux disponibles dans le GTFS.
@@ -115,6 +119,55 @@ principale absente. À corriger à la main dans JOSM si besoin pour ces réseaux
 - **Quai** (`public_transport=platform` + `highway=bus_stop`) : `bus=yes`, `name`, `network`
   (+ `network:wikidata` si connu), `gtfs:stop_id`, `ref:FR:Atoumod` (`ref:FR:Atoumod:2` si le quai en a déjà un autre), et `ref`/`wheelchair` si présents dans
   le GTFS.
+  Un même `stop_id` GTFS n'est posé que sur **un seul quai** : quand le GTFS n'a qu'un arrêt pour les deux
+  sens, les deux quais sont dans les relations mais seul celui qui porte déjà le `stop_id` dans OSM (cherché
+  jusqu'à 100 m, coordonnées GTFS approximatives), sinon le plus proche de l'arrêt GTFS, reçoit
+  `gtfs:stop_id`, `ref:FR:Atoumod`, `ref` et `wheelchair` ; l'autre n'a que `name` et `network`. Si le
+  `stop_id` est déjà sur un quai OSM non retenu, il n'est posé nulle part et le script le signale.
 - **Stop_position** (sur la voie) : seulement `public_transport=stop_position`, `bus=yes`, `name` — pas de
   `network` (une stop_position est partagée par toutes les lignes qui passent par cette voie, quel que soit
   leur réseau).
+
+## Quais Nomad seuls (`nomad_platforms.py`)
+
+Script indépendant qui complète les quais OSM existants avec les arrêts GTFS Nomad Car, sans créer de
+relations : chaque arrêt est associé au quai OSM le plus proche (≤ 30 m, un quai par arrêt), qui reçoit
+`gtfs:stop_id:FR-NOR-Nomad`, `gtfs:stop_name:FR-NOR-Nomad`, `route_ref` (+ `bus`/`wheelchair` s'ils
+manquent).
+
+```bash
+python nomad_platforms.py   # -> output_osm/nomad_platforms.osm + nomad_platforms_non_trouves.csv
+```
+
+## Organisation du code
+
+`mapping.py` n'est que la ligne de commande ; le traitement est dans le paquet `atoumod/`, un module par
+étape :
+
+| Module | Rôle |
+|---|---|
+| `config.py` | chemins, seuils de distance (`MAX_*_M`), réseaux connus (`NETWORKS`) : les réglages sont ici |
+| `pipeline.py` | enchaînement complet (`run`) : sélection des lignes → écriture du `.osm` |
+| `gtfs.py` | lecture du GTFS, variantes de chaque ligne |
+| `stops.py` | arrêts GTFS ↔ quais OSM candidats, arrêt d'en face (codes `2702282A` / `2702282B`) |
+| `matching.py` | map-matching des tracés par Valhalla |
+| `osm.py` | lecture du PBF (osmium), objets modifiés, écriture du `.osm` |
+| `roundabouts.py` | découpage des ronds-points d'un seul tenant |
+| `platforms.py` | stop_position et quai de chaque arrêt : côté de la route, arrêt d'en face, un seul quai par `stop_id` |
+| `naming.py` | réseau d'une agence, libellés « VILLE Arrêt », noms des relations |
+| `build.py` | relations `route` / `route_master` d'une ligne |
+| `geo.py` | géométrie locale (distances, côté droit/gauche) |
+
+Tous les objets OSM passent par `obj = ChainMap(modifiés, PBF)` : ce qui est créé ou modifié est dans
+`obj.maps[0]` (et sera écrit), le PBF lu reste intact en dessous. Détails en tête de `atoumod/osm.py`.
+
+### Tests
+
+```bash
+python -m pytest
+```
+
+Les tests (`tests/`) couvrent les règles les plus fragiles sur de petites données construites à la main,
+sans réseau ni PBF : libellés « VILLE Arrêt », côté de la route et sens de parcours, arrêt d'en face,
+un seul quai par `stop_id`, découpage des ronds-points. Ajouter un cas de test à chaque erreur trouvée
+à la relecture dans JOSM.
