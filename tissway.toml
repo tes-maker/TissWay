@@ -1,0 +1,87 @@
+# TissWay profile: Atoumod, the regional GTFS of Normandy (Nomad, Twisto, Astuce, ...).
+#
+# Every key is optional: see the README ("Profile") and tissway/config.py for all the settings and their
+# defaults. Relative paths are resolved from this file's directory.
+
+gtfs = "gtfs_atoumod"                 # directory or .zip
+pbf = "normandy-latest.osm.pbf"
+extracts = [                          # downloaded and merged into pbf by "extracts" and "routes"
+    "https://download.openstreetmap.fr/extracts/europe/france/basse_normandie-latest.osm.pbf",
+    "https://download.openstreetmap.fr/extracts/europe/france/haute_normandie-latest.osm.pbf",
+    "https://download.openstreetmap.fr/extracts/europe/france/centre-latest.osm.pbf",
+]
+output_name = "atoumod"               # output file name when no network is selected
+
+feed = "FR-NOR-Atoumod"               # gtfs:route_id:FR-NOR-Atoumod, ...
+stop_ref_tags = ["ref:FR:Atoumod"]    # platform tags also holding the stop_id
+modes = ["bus"]                       # GTFS route_type 3: train, tram and ferry routes are left out
+
+locality = "insee"                    # "CAEN Gare Routière": commune of the INSEE code in the stop_id
+fix_accents = true                    # "Gare Routiere" -> "Gare Routière"
+
+[valhalla]
+container = "valhalla_nomad"
+
+# Networks checked on OSM, by GTFS agency_id. Other agencies get {"network": <agency_name>} without any
+# unverified wikidata.
+[networks."ATOUMOD040:Network:040:LOC"]
+network = "Nomad"
+"network:wikidata" = "Q98131290"
+"network:wikipedia" = "fr:Nomad (réseau)"
+
+[networks."ATOUMOD029:Network:029:LOC"]
+network = "Twisto"
+"network:wikidata" = "Q3537947"
+
+# --- PTNA lists (ptna command) ---------------------------------------------------------------------------
+[ptna]
+id_prefix = "FR-NOR-"                 # PTNA network id of a network without page settings
+categories = ["PTNA", "Normandie"]
+
+# Wiki texts of the French OSM wiki (the defaults are English, see tissway/ptna.py).
+[ptna.text]
+other = "Autres lignes"
+new = "Nouvelles lignes (GTFS du {date:%d/%m/%Y}, à classer)"
+csv_intro = "Cette page respecte le format CSV de PTNA. Pour plus d'informations, voir [[FR:Public Transport Network Analysis/Syntaxe des données CSV]]."
+tool = "# Ces données sont entrées pour l'outil : PTNA - Analyse du réseau de transport public (https://ptna.openstreetmap.de)"
+overview = "= Aperçu du {title}"
+default_title = "Réseau {network}"
+overview_link = "- Un aperçu du {link} est disponible dans le Wiki OSM."
+page_link = "- Fichier de configuration pour cette analyse : {link}."
+config_link = "- Fichier de configuration de [/fr/config.php?network={ptna} PTNA]"
+platform_suffix = '[\s-]+(?:quai|qu\.)\s*\w{1,2}$'
+
+[ptna.text.modes]
+tram = "Lignes de tramway"
+subway = "Lignes de métro"
+train = "Lignes de train"
+bus = "Lignes de bus"
+coach = "Lignes d'autocar"
+ferry = "Lignes de bac / ferry"
+aerialway = "Remontées mécaniques"
+funicular = "Funiculaires"
+trolleybus = "Lignes de trolleybus"
+monorail = "Monorails"
+
+# Sub-sections per network (network tag): [title, regex on the whole route_short_name], in display order
+# within each mode. A route goes to the first matching sub-section, the others to text.other.
+[ptna.sections]
+Twisto = [
+    ["Lignes Fortes", '(\d|1[0-2])[A-Z]?'],
+    ["Lignes express", '\d+ ?EX(PRESS)?'],
+    ["Lignes de proximité", '[23]\d'],
+    ["Lignes Flexo Pro", '4\d'],
+    ["Lignes navettes", 'NAV.*'],
+    ["Lignes Nocturnes", 'NOCTIBUS'],
+    ["Lignes réseaux complémentaires", '1\d\d[A-Z]?'],
+]
+
+# Generated wiki page per network (all keys optional): title ("= Aperçu du <title>"), overview and page
+# (wiki links), ptna_id, categories, modes (section titles replaced).
+[ptna.pages.Twisto]
+title = "Réseau de transports en commun de Caen Normandie Métropole"
+overview = "[[Caen/Transports_en_commun#Réseau_Twisto|réseau Twisto de Caen Normandie Métropole]]"
+page = "[[Caen/Transports_en_commun/PTNA/Lignes-Twisto|lignes Twisto]]"
+ptna_id = "FR-NOR-Twisto"
+categories = ["Caen", "PTNA", "Normandie"]
+modes = { "Lignes de tramway" = "Ligne de tramway" }

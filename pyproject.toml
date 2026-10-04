@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tissway"
+dynamic = ["version"]
+description = "OpenStreetMap public transport relations (PTv2) from any GTFS feed, to review in JOSM"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = [
+    "geopandas>=0.14",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "requests>=2.28",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[project.scripts]
+tissway = "tissway.cli:main"
+
+[tool.setuptools]
+packages = ["tissway"]
+
+[tool.setuptools.package-data]
+tissway = ["data/*.txt"]
+
+[tool.setuptools.dynamic]
+version = { attr = "tissway.__version__" }
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning:pyproj.*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E731",  # small lambdas are used as local helpers
+    "B905",  # zip(a, a[1:]) pairs are deliberately unequal
+]
