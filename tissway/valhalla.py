@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -62,15 +63,34 @@ def _data_dir():
 
 def remove_tiles():
     """Delete the generated tiles (as root inside a container: they belong to the container's user)."""
-    _docker(["run", "--rm", "--user", "0:0", "--entrypoint", "/bin/rm", "-v", f"{_data_dir()}:/custom_files",
+    _docker(["run", "--rm", "--quiet", "--user", "0:0", "--entrypoint", "/bin/rm", "-v", f"{_data_dir()}:/custom_files",
              settings.valhalla.image, "-rf", *(f"/custom_files/{g}" for g in GENERATED)])
+
+
+def _port():
+    """Host port of the server, from settings.valhalla.url."""
+    return urlparse(settings.valhalla.url).port or 8002
+
+
+def _start(args):
+    """docker run / start, with a readable error when the host port is taken."""
+    try:
+        _docker(args)
+    except RuntimeError as e:
+        if "address already in use" not in str(e):
+            raise
+        raise RuntimeError(
+            f"port {_port()} is already in use, so the Valhalla container cannot listen on it. Another program "
+            f"holds it (see: sudo ss -ltnp | grep :{_port()}): often a container started by a second Docker "
+            "daemon (Docker installed both as a snap and with apt), or another Valhalla. Stop it, or set "
+            "another port in [valhalla] url of the profile.") from e
 
 
 def create_container():
     v = settings.valhalla
-    _docker(["run", "-d", "--name", v.container, "--restart", "unless-stopped", "-p", "8002:8002",
-             "-v", f"{_data_dir()}:/custom_files", "-e", "serve_tiles=True", "-e", "build_admins=True",
-             "-e", f"server_threads={v.threads}", v.image])
+    _start(["run", "-d", "--quiet", "--name", v.container, "--restart", "unless-stopped",
+            "-p", f"{_port()}:8002", "-v", f"{_data_dir()}:/custom_files", "-e", "serve_tiles=True",
+            "-e", "build_admins=True", "-e", f"server_threads={v.threads}", v.image])
 
 
 def wait_until_ready():
@@ -119,7 +139,7 @@ def ensure_running():
         _docker(["rm", "-f", settings.valhalla.container])
         create_container()
     elif state is False:
-        _docker(["start", settings.valhalla.container])
+        _start(["start", settings.valhalla.container])
     elif state is None:
         create_container()
 

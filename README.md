@@ -38,7 +38,9 @@ Requirements: Python ≥ 3.9, [osmium-tool](https://osmcode.org/osmium-tool/) an
 On Debian / Ubuntu:
 
 ```bash
-sudo apt install python3 python3-venv osmium-tool docker.io
+sudo apt install git python3 python3-venv osmium-tool docker.io
+git clone https://github.com/tes-maker/TissWay.git
+cd TissWay
 make install                            # creates .venv/ and installs tissway in it
 source .venv/bin/activate               # puts the tissway command on the PATH
 ```
@@ -51,6 +53,10 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
+
+Leave `docker.io` out if Docker is already installed (`docker --version`), e.g. as a snap or from
+docker.com: two Docker daemons side by side share the `docker` command but not their containers, and the
+Valhalla container of one blocks port 8002 for the other (`address already in use`).
 
 Recent distributions (Ubuntu ≥ 23.04, Debian ≥ 12…) refuse `pip install` outside a virtual environment
 (`error: externally-managed-environment`, PEP 668), hence the `.venv/`. The `make` targets use it

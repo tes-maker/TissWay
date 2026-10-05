@@ -1,3 +1,4 @@
+.36
 """Local geometry: distances, kerb side, polylines."""
 import pytest
 

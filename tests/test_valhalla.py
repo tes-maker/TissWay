@@ -51,3 +51,24 @@ def test_recreates_the_container_when_the_project_moved(setup, monkeypatch, defa
     assert ["rm", "-f", default_settings.valhalla.container] in calls
     assert any(a[:2] == ["run", "-d"] for a in calls)
     assert not any("--user" in a for a in calls)  # tiles kept
+
+
+def test_host_port_follows_the_url(setup, monkeypatch, default_settings):
+    pbf, calls = setup
+    default_settings.valhalla.url = "http://localhost:8003"
+    monkeypatch.setattr(valhalla, "container_state", lambda: None)
+    valhalla.ensure_running()
+    run = next(a for a in calls if a[:2] == ["run", "-d"])
+    assert run[run.index("-p") + 1] == "8003:8002"
+
+
+def test_port_in_use_gives_a_readable_error(setup, monkeypatch, default_settings):
+    def docker(args, check=True):
+        if args[0] == "run" and "-d" in args:
+            raise RuntimeError("docker: Error response from daemon: failed to bind host port 0.0.0.0:8002/tcp: "
+                               "address already in use")
+
+    monkeypatch.setattr(valhalla, "_docker", docker)
+    monkeypatch.setattr(valhalla, "container_state", lambda: None)
+    with pytest.raises(RuntimeError, match=r"port 8002 is already in use.*second Docker"):
+        valhalla.ensure_running()
