@@ -9,12 +9,13 @@ description = "OpenStreetMap public transport relations (PTv2) from any GTFS fee
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "geopandas>=0.14",
     "numpy>=1.24",
     "pandas>=2.0",
     "requests>=2.28",
+    "tomli>=1.1; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +40,7 @@ filterwarnings = ["ignore::DeprecationWarning:pyproj.*"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py311"
+target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]

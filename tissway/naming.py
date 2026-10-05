@@ -146,8 +146,9 @@ def strip_locality(ville, name):
         if re.fullmatch(LINK_WORDS, words[n - 1]) or (n == 1 and words[0].startswith("(?:")):
             continue
         # followed by a space or ":" (not "CONDE-SUR-NOIREAU"), then neither "/", a link word nor the rest
-        # of the commune ("PACY S/ EURE", "Mont aux Malades", "NOTRE DAME D'ESTREES")
-        starts.append(rf"{'[ -]'.join(words[:n])}(?=[ :][ :-]*+(?!/|S/|D'|(?:{LINK_WORDS}|{words[n]})\b))")
+        # of the commune ("PACY S/ EURE", "Mont aux Malades", "NOTRE DAME D'ESTREES"). "[ :-]" in the negative
+        # lookahead makes [ :-]* consume every separator (no possessive *+ before Python 3.11)
+        starts.append(rf"{'[ -]'.join(words[:n])}(?=[ :][ :-]*(?![ :-]|/|S/|D'|(?:{LINK_WORDS}|{words[n]})\b))")
     prefix = re.match(rf"(?:{'|'.join(starts)})\b[ :-]*", unaccent(name), re.IGNORECASE)
     return name[prefix.end():] if prefix else name
 

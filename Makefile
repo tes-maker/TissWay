@@ -6,8 +6,11 @@
 #   make clean                              delete generated files (keeps extracts, GTFS, Valhalla tiles)
 #
 # "make help" lists the other targets. PROFILE selects another TOML profile (default: ./tissway.toml).
+# "make install" creates a virtual environment in .venv/, which the other targets then use.
 
-PYTHON ?= python
+VENV ?= .venv
+PYTHON3 ?= python3
+PYTHON ?= $(if $(wildcard $(VENV)/bin/python),$(VENV)/bin/python,$(PYTHON3))
 NETWORK ?=
 ROUTES ?=
 PROFILE ?=
@@ -42,8 +45,10 @@ valhalla: ## start Valhalla (rebuilds its tiles if the extract changed)
 extracts: ## download and merge the OSM extracts of the profile
 	$(GTFS2OSM) extracts
 
-install: ## install tissway and the development tools in the current environment
-	$(PYTHON) -m pip install -e ".[dev]"
+install: ## create the virtual environment .venv/ and install tissway and the development tools in it
+	$(PYTHON3) -m venv $(VENV)
+	$(VENV)/bin/python -m pip install --upgrade pip
+	$(VENV)/bin/python -m pip install -e ".[dev]"
 
 clean: ## delete generated files (output_osm/, Python and pytest caches)
 	rm -rf output_osm/*.osm output_osm/*.csv

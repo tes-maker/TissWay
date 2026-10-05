@@ -33,12 +33,28 @@ GTFS ──► variants ──► map-matching (Valhalla) ──► stops on the
 
 ## Installation
 
-Requirements: Python ≥ 3.11, [osmium-tool](https://osmcode.org/osmium-tool/) and Docker (for Valhalla).
+Requirements: Python ≥ 3.9, [osmium-tool](https://osmcode.org/osmium-tool/) and Docker (for Valhalla).
+
+On Debian / Ubuntu:
 
 ```bash
-sudo apt install osmium-tool docker.io
-python -m pip install -e ".[dev]"      # or: make install
+sudo apt install python3 python3-venv osmium-tool docker.io
+make install                            # creates .venv/ and installs tissway in it
+source .venv/bin/activate               # puts the tissway command on the PATH
 ```
+
+Without make, the same thing by hand:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+```
+
+Recent distributions (Ubuntu ≥ 23.04, Debian ≥ 12…) refuse `pip install` outside a virtual environment
+(`error: externally-managed-environment`, PEP 668), hence the `.venv/`. The `make` targets use it
+automatically once it exists, whether it is activated or not.
 
 This installs the `tissway` command. `python -m tissway` works as well, without installing.
 
@@ -72,20 +88,25 @@ With the Atoumod profile shipped in this repository:
 ```bash
 make                                    # tests, then every line of every network
 make NETWORK=nomad ROUTES="301 305"     # -> output_osm/nomad_301_305.osm
-tissway routes -n Twisto 1 2           # same thing without make
+tissway routes -n Nomad 301 305         # same thing without make
 ```
 
 ## Commands
 
-`tissway [--profile FILE] [--verbose] <command>`. The profile defaults to `$TISSWAY_PROFILE`, then to
-`./tissway.toml`.
+`tissway [-p FILE] [-v] <command>`, or `python -m tissway …` (`.venv/bin/tissway …` without activating the
+virtual environment).
+
+- `-p`, `--profile FILE`: TOML profile; defaults to `$TISSWAY_PROFILE`, then to `./tissway.toml`, else
+  built-in defaults only.
+- `-v`, `--verbose`: debug log, and the full traceback on error (otherwise a one-line `error: …`).
+- `--version`: print the version.
 
 | Command | Purpose |
 |---|---|
 | `routes [-n NETWORK] [-l REF…] [REF…]` | PTv2 relations of the selected lines → `<output_dir>/<network>[_<refs>].osm`. `--no-download` keeps the current extract; `--no-prepare` also leaves Valhalla alone; `--new-relations` never updates existing relations |
-| `platforms -n NETWORK [--feed ID] [--max-distance M]` | completes the existing OSM platforms with the GTFS stops of a network (`gtfs:stop_id:<feed>`, `gtfs:stop_name:<feed>`, `route_ref`), without relations; unmatched stops go to a CSV |
-| `add-via FILE.osm [-o OUT \| --in-place]` | adds `via …` to route relations sharing a name, with as few distinguishing stops as possible |
-| `ptna [LIST.txt] [-n NETWORK]` | updates (or, without a file, generates) the [PTNA](https://ptna.openstreetmap.de) route list of a network |
+| `platforms -n NETWORK [--feed ID] [--max-distance M]` | completes the existing OSM platforms (within `M` metres, default 30) with the GTFS stops of a network (`gtfs:stop_id:<feed>`, `gtfs:stop_name:<feed>`, `route_ref`), without relations → `<output_dir>/<network>_platforms.osm`; unmatched stops go to `<network>_platforms_unmatched.csv`. `--feed` defaults to the `feed` of the profile |
+| `add-via FILE.osm [-o OUT \| --in-place] [--prefix TEXT]` | adds `via …` to route relations sharing a name, with as few distinguishing stops as possible → `<file>_renamed.osm` by default. `--prefix` restricts it to names starting with `TEXT` (e.g. `'Bus 117:'`) |
+| `ptna [LIST.txt] [-n NETWORK] [-o OUT] [--title T] [--operator OP] [--ref-gtfs]` | updates (or, without a file, generates) the [PTNA](https://ptna.openstreetmap.de) route list of a network → `<output_dir>/ptna_<network>.txt`. Without `-n`, an interactive menu asks for the network, the page title and the operator. `--operator` sets the operator of every route, `--ref-gtfs` replaces the refs by the GTFS `route_short_name` |
 | `extracts [--force \| --no-download]` | downloads the extracts of the profile and merges them into `pbf` |
 | `valhalla` | starts Valhalla, rebuilding its tiles when the extract changed |
 
@@ -106,6 +127,7 @@ Every key is optional; relative paths are resolved from the profile's directory.
 | `gtfs` | `gtfs` | GTFS directory or `.zip` |
 | `pbf` | `data.osm.pbf` | OSM extract covering the feed |
 | `extracts` | `[]` | URLs of `.osm.pbf` extracts downloaded (as `<name>-<YYMMDD>.osm.pbf` in `extracts_dir`) and merged into `pbf` |
+| `extracts_dir` | `.` | folder of the downloaded extracts |
 | `output_dir`, `output_name` | `output_osm`, `gtfs` | output folder, and file name when no network is selected |
 | `stops_cache`, `routes_cache` | `osm_bus_stops.geojsonseq`, `osm_routes.opl` | OSM platforms and route relations extracted from `pbf`; rebuilt whenever `pbf` is newer |
 | `feed` | `""` | suffix of the `gtfs:*` tags (`gtfs:route_id:<feed>`…) and PTNA feed field |
@@ -114,11 +136,12 @@ Every key is optional; relative paths are resolved from the profile's directory.
 | `driving_side` | `right` | `left` in left-hand traffic: platforms are picked on the kerb side |
 | `networks` | `{}` | `agency_id` (or `agency_name`) → network tags. Other agencies get `network=<agency_name>`, without the part in parentheses |
 | `locality` | `none` | `insee`: prefix stop labels with the French commune (from a `FR:<INSEE>:` stop_id, else from the position) |
+| `locality_api` | `https://geo.api.gouv.fr/communes` | API giving the commune of an INSEE code or a position (`locality = "insee"`) |
 | `fix_accents` | `false` | restore French accents commonly dropped by producers (`Gare Routiere` → `Gare Routière`, words in [data/fr_accents.txt](tissway/data/fr_accents.txt)) |
 | `update_existing` | `true` | update the existing OSM relations of a line instead of creating new ones |
 | `existing_min_similarity` | 0.4 | minimum similarity (0–1) between a generated variant and an existing relation to update it |
 | `[thresholds]` | | distances in metres, see below |
-| `[valhalla]` | | `url`, `container`, `image`, `data_dir`, `threads`, `wait_s` |
+| `[valhalla]` | | local Valhalla server, see below |
 | `[ptna]` | | `id_prefix`, `categories`, `sections`, `pages`, `text` (wiki texts replacing the English ones), see `tissway.toml` |
 
 Thresholds:
@@ -135,6 +158,17 @@ Thresholds:
 | `sibling_m` | 100 | GTFS stop → other platform of the same stop |
 | `max_far_stops` | 0.2 | share of stops further than `stop_position_m` from the matched shape before the shape is rejected |
 | `trace_m`, `trace_points` | 150 000, 10 000 | longer shapes are matched in chunks (Valhalla limits) |
+
+Valhalla:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `url` | `http://localhost:8002` | Valhalla server |
+| `container` | `valhalla` | Docker container name |
+| `image` | `ghcr.io/nilsnolde/docker-valhalla/valhalla:latest` | Docker image |
+| `data_dir` | `valhalla_data` | routing tiles and the copy of the extract |
+| `threads` | 8 | Valhalla server threads (`server_threads`) |
+| `wait_s` | 1800 | how long to wait for the server to be ready (tile building can be long) |
 
 ## How it works
 
@@ -217,10 +251,11 @@ through the same node are not split, because the cut position is ambiguous.
 ### Names
 
 Relations follow `Bus <ref>: <from> → <to>`, and route masters `Bus <ref>: A ↔ B` (or `A1 / A2 ↔ B` when a
-line has branches). Stop labels are the GTFS names. With `locality = "insee"` they become
-`LOCALITY Stop`, with the locality in capitals and without accents. Any repetition of the locality in the
-stop name is removed (`Avranches - Gare` → `AVRANCHES Gare`, `Fleury Mairie` → `FLEURY-SUR-ORNE Mairie`).
-Platforms, stop_positions and `from`/`to` keep the exact GTFS name.
+line has branches); the prefix follows the mode (`Coach`, `Trolleybus`…). Stop labels are the GTFS names.
+With `locality = "insee"` they become `LOCALITY Stop`, with the locality in capitals and without accents. Any
+repetition of the locality in the stop name is removed (`Avranches - Gare` → `AVRANCHES Gare`,
+`Fleury Mairie` → `FLEURY-SUR-ORNE Mairie`). Platforms, stop_positions and `from`/`to` keep the exact GTFS
+name.
 
 ## Tags written
 
@@ -230,9 +265,9 @@ Platforms, stop_positions and `from`/`to` keep the exact GTFS name.
   suffix when `feed` is set.
 - **route_master**: `type=route_master`, `route_master=<mode>`, `ref`, `name`, network, colours,
   `gtfs:route_id`.
-- **platform**: `public_transport=platform`, `highway=bus_stop`, `bus=yes`, `name`, network,
-  `gtfs:stop_id` (+ `stop_ref_tags`), `ref` (stop_code), `local_ref` (platform_code), `wheelchair`.
-- **stop_position**: `public_transport=stop_position`, `bus=yes`, `name`.
+- **platform**: `public_transport=platform`, `highway=bus_stop`, `bus=yes` (or `trolleybus=yes`), `name`,
+  network, `gtfs:stop_id` (+ `stop_ref_tags`), `ref` (stop_code), `local_ref` (platform_code), `wheelchair`.
+- **stop_position**: `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`), `name`.
 
 No `operator` is set: the actual operator of a line (often a subcontractor) is not reliable in GTFS
 feeds. Add it by hand in JOSM if you know it.
@@ -254,9 +289,16 @@ When an error comes back from the review, add a test case for it (see below).
 ## Development
 
 ```bash
+make install  # .venv/ with tissway (editable), pytest and ruff
 make test     # pytest: hand-built data, no network access, no extract, < 1 s
 make lint     # ruff
+make clean    # generated files and caches (keeps extracts, GTFS and Valhalla tiles)
+make help     # every target
 ```
+
+Supported Python versions: 3.9 to 3.14 (`tomli` replaces `tomllib` before 3.11). Keep the code compatible
+with 3.9: no `match`, no possessive quantifiers or atomic groups in regexes, and
+`from __future__ import annotations` for `X | None` annotations.
 
 | Module | Role |
 |---|---|
