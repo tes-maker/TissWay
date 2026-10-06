@@ -13,6 +13,9 @@ settings.routes_cache, rebuilt whenever the extract is newer). For each line:
   network. It keeps its id and its other members; the generated relations are added to it.
 Existing relations of the line left unpaired are never deleted: they are reported, to check in JOSM
 (obsolete variant, or one the GTFS no longer runs).
+
+The network:wikidata / network:wikipedia of a network missing from the profile are taken from its existing
+relations when they agree (network_wikis), so that platforms and relations all carry them.
 """
 
 from __future__ import annotations
@@ -114,6 +117,26 @@ def merge_tags(old, new):
     return {**{k: v for k, v in old.items() if k not in stale}, **new}
 
 
+WIKI_KEYS = ("network:wikidata", "network:wikipedia")
+WIKI_MIN_RELATIONS = 3  # existing relations agreeing on a value before it is used
+
+
+def network_wikis(relations):
+    """network -> {network:wikidata, network:wikipedia} of the existing route relations and route masters
+    with that network tag. A value is kept only when every relation carrying the key agrees on it, and at
+    least WIKI_MIN_RELATIONS of them do: mapped by the community, not guessed."""
+    seen = defaultdict(lambda: defaultdict(list))
+    for o in relations.values():
+        tags = o["tags"]
+        if tags.get("network") and tags.get("type") in ("route", "route_master"):
+            for key in WIKI_KEYS:
+                if tags.get(key):
+                    seen[tags["network"]][key].append(tags[key])
+    return {network: {key: values[0] for key, values in by_key.items()
+                      if len(values) >= WIKI_MIN_RELATIONS and len(set(values)) == 1}
+            for network, by_key in seen.items()}
+
+
 class ExistingRoutes:
     """Route relations and route masters of the extract, and those already claimed by a generated line."""
 
@@ -125,6 +148,7 @@ class ExistingRoutes:
             for ref, _ in o["members"]:
                 self.parents[ref].append(k)
         self.claimed = set()
+        self.wikis = network_wikis(relations)
 
     @classmethod
     def load(cls):

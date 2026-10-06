@@ -142,6 +142,7 @@ Every key is optional; relative paths are resolved from the profile's directory.
 | `modes` | `["bus", "coach", "trolleybus"]` | OSM `route=*` values generated (from basic and extended GTFS route types) |
 | `driving_side` | `right` | `left` in left-hand traffic: platforms are picked on the kerb side |
 | `networks` | `{}` | `agency_id` (or `agency_name`) → network tags. Other agencies get `network=<agency_name>`, without the part in parentheses |
+| `network_wiki_from_osm` | `true` | `network:wikidata` / `network:wikipedia` missing from `networks`: taken from the existing OSM relations of the network when they agree |
 | `locality` | `none` | `insee`: prefix stop labels with the French commune (from a `FR:<INSEE>:` stop_id, else from the position) |
 | `locality_api` | `https://geo.api.gouv.fr/communes` | API giving the commune of an INSEE code or a position (`locality = "insee"`) |
 | `fix_accents` | `false` | restore French accents commonly dropped by producers (`Gare Routiere` → `Gare Routière`, words in [data/fr_accents.txt](tissway/data/fr_accents.txt)) |
@@ -292,6 +293,13 @@ name.
 - **platform**: `public_transport=platform`, `highway=bus_stop`, `bus=yes` (or `trolleybus=yes`), `name`,
   network, `gtfs:stop_id` (+ `stop_ref_tags`), `ref` (stop_code, else with `ref_from_stop_id` the code of a NeTEx-style stop_id: `FR:76216:ZE:TCARxCAILL3:ATOUMOD001` → `TCARxCAILL3`), `local_ref` (platform_code), `wheelchair`.
 - **stop_position**: `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`), `name`.
+
+The network tags are `network`, `network:wikidata` and `network:wikipedia`, from `networks` in the
+profile; with `network_wiki_from_osm` (default), the wiki keys a network lacks there are taken from its
+existing OSM relations when they all agree. On a platform shared with another network, they get the same
+number as `network` (`network:2`, `network:wikidata:2`…). Every relation, route master and platform of the
+output file whose network is known gets the wiki keys it lacks, existing relations of other lines
+included (updated for a split way); values already set are kept.
 
 No `operator` is set: the actual operator of a line (often a subcontractor) is not reliable in GTFS
 feeds. Add it by hand in JOSM if you know it.

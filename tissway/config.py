@@ -94,6 +94,9 @@ class Settings:
     # --- existing relations (see existing.py) ---
     update_existing: bool = True  # update the existing OSM relations of a line instead of creating new ones
     existing_min_similarity: float = 0.4  # generated variant <-> existing relation, see existing.similarity
+    # network:wikidata / network:wikipedia missing from networks: taken from the existing OSM relations of
+    # the network when they agree (see existing.network_wikis)
+    network_wiki_from_osm: bool = True
 
     # --- split ways (see splitting.py) ---
     split_roundabouts: bool = True  # False: roundabouts (junction=roundabout / circular) kept whole in the relations

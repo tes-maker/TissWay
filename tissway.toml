@@ -33,6 +33,12 @@ network = "Nomad"
 [networks."ATOUMOD029:Network:029:LOC"]
 network = "Twisto"
 "network:wikidata" = "Q3537947"
+"network:wikipedia" = "fr:Transports en commun de Caen"
+
+[networks."ATOUMOD001:Network:001:LOC"]
+network = "Astuce"
+"network:wikidata" = "Q3537964"
+"network:wikipedia" = "fr:Réseau Astuce"
 
 # --- PTNA lists (ptna command) ---------------------------------------------------------------------------
 [ptna]

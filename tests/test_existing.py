@@ -5,7 +5,8 @@ import pandas as pd
 import pytest
 
 from tissway.build import build_line
-from tissway.existing import ExistingRoutes, merge_tags, same_direction, similarity
+from tissway.existing import ExistingRoutes, merge_tags, network_wikis, same_direction, similarity
+from tissway.pipeline import complete_wikis, with_wikis
 
 NOMAD = {"network": "Nomad"}
 
@@ -93,3 +94,54 @@ def test_build_line_updates_the_existing_relations():
     assert [role for _, role in rel["members"]] == ["stop", "platform", "stop", "platform", ""]
     assert obj["r20"]["members"] == [("r10", ""), ("r99", "")]  # other member kept, ours already there
     assert not [k for k in obj.maps[0] if k.startswith("r-")]  # nothing duplicated
+
+
+def test_network_wikis_only_when_the_existing_relations_agree():
+    rel = lambda **tags: {"tags": {"type": "route", **tags}, "members": []}
+    relations = {
+        **{f"r{i}": rel(network="Astuce", **{"network:wikidata": "Q3537964"}) for i in range(3)},
+        "r3": rel(network="Astuce"),  # without wikidata: ignored
+        **{f"r1{i}": rel(network="Nomad", **{"network:wikidata": "Q98131290"}) for i in range(3)},
+        "r20": rel(network="Nomad", **{"network:wikidata": "Q1"}),  # disagreement: nothing
+        **{f"r3{i}": rel(network="Lexo", **{"network:wikidata": "Q2"}) for i in range(2)},  # too few
+    }
+    wikis = network_wikis(relations)
+    assert wikis["Astuce"] == {"network:wikidata": "Q3537964"}
+    assert wikis["Nomad"] == {} and wikis["Lexo"] == {}
+
+
+def test_with_wikis_completes_the_profile_without_overriding_it():
+    wikis = {"Astuce": {"network:wikidata": "Q3537964", "network:wikipedia": "fr:Réseau Astuce"},
+             "Twisto": {"network:wikidata": "Q3537947", "network:wikipedia": "fr:Twisto"},
+             "Nomad": {"network:wikidata": "Q1", "network:wikipedia": "fr:Autre"}}
+    networks = {"a1": {"network": "Astuce"},
+                "a2": {"network": "Twisto", "network:wikidata": "Q3537947"},
+                "a3": {"network": "Nomad", "network:wikidata": "Q98131290"},
+                "a4": {"network": "Inconnu"}}
+    out = with_wikis(networks, wikis)
+    assert out["a1"] == {"network": "Astuce", "network:wikidata": "Q3537964", "network:wikipedia": "fr:Réseau Astuce"}
+    assert out["a2"]["network:wikipedia"] == "fr:Twisto"  # same entity: missing key completed
+    assert out["a3"] == networks["a3"]  # the profile names another entity: nothing taken
+    assert out["a4"] == {"network": "Inconnu"}
+
+
+def test_complete_wikis_on_the_objects_of_the_file():
+    networks = {"A1": {"network": "Astuce", "network:wikidata": "Q3537964", "network:wikipedia": "fr:Réseau Astuce"},
+                "A2": {"network": "Twisto", "network:wikidata": "Q3537947"}}
+    untouched = {"r9": {"tags": {"type": "route", "network": "Astuce"}}}
+    obj = ChainMap({
+        # existing relation of another line, updated by a split way: completed, its wikidata kept
+        "r1": {"tags": {"type": "route", "network": "Astuce", "network:wikidata": "Q1"}},
+        # platform shared with another network: the numbered keys of Astuce
+        "n1": {"tags": {"public_transport": "platform", "network": "Twisto", "network:2": "Astuce"}},
+        "r2": {"tags": {"type": "route", "network": "lcn"}},  # unknown network
+        "w1": {"tags": {"highway": "residential", "network": "Astuce"}},  # neither route nor platform
+    }, untouched)
+    assert complete_wikis(obj, networks) == 2
+    assert obj["r1"]["tags"] == {"type": "route", "network": "Astuce", "network:wikidata": "Q1",
+                                 "network:wikipedia": "fr:Réseau Astuce"}
+    assert obj["n1"]["tags"] == {"public_transport": "platform", "network": "Twisto", "network:2": "Astuce",
+                                 "network:wikidata": "Q3537947", "network:wikidata:2": "Q3537964",
+                                 "network:wikipedia:2": "fr:Réseau Astuce"}
+    assert obj["r2"]["tags"] == {"type": "route", "network": "lcn"} and "network:wikidata" not in obj["w1"]["tags"]
+    assert "r9" not in obj.maps[0]  # objects outside the file are not added to it

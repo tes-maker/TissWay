@@ -5,8 +5,9 @@ Steps of run():
 2. GTFS stops related to the OSM platforms (stops.match_stops);
 3. map-matching of each variant with Valhalla (matching.match_variant);
 4. reading of the travelled ways and candidate platforms in the extract;
-5. relations of each line (build.build_line), existing ones updated in place (existing.py), then GTFS tags
-   of the platforms (platforms.tag_platforms);
+5. relations of each line (build.build_line), existing ones updated in place (existing.py), with the
+   network:wikidata / network:wikipedia of the existing relations when the profile has none (with_wikis),
+   then GTFS and network tags of the platforms (platforms.tag_platforms);
 6. ways split where routes enter or leave them (streets, roundabouts, termini), once for all the lines,
    existing relations updated (splitting.split_ways);
 7. a single .osm file is written (objects shared between lines: no conflict on upload).
@@ -22,7 +23,7 @@ import requests
 
 from .build import build_line
 from .config import settings
-from .existing import ExistingRoutes
+from .existing import WIKI_KEYS, ExistingRoutes
 from .gtfs import Feed, line_variants, ref_sort_key, stop_sequences
 from .matching import MatchError, match_variant, valhalla_ready
 from .naming import agency_networks, clean_stop_name, line_label, slug
@@ -92,6 +93,43 @@ def output_path(network, refs):
     return settings.output_dir / f"{'_'.join([name, *map(slug, refs)])}.osm"
 
 
+def with_wikis(networks, wikis):
+    """networks (agency_id -> network tags) completed with the network:wikidata / network:wikipedia of
+    the existing OSM relations (wikis: see existing.network_wikis), for the keys the profile does not set.
+    Nothing is taken when the profile gives another network:wikidata (another entity)."""
+    out = {}
+    for agency_id, tags in networks.items():
+        known = wikis.get(tags["network"], {})
+        if tags.get("network:wikidata", known.get("network:wikidata")) != known.get("network:wikidata"):
+            known = {}  # the profile names another entity: nothing taken from OSM
+        out[agency_id] = {**tags, **{k: v for k, v in known.items() if k not in tags}}
+        added = sorted(set(out[agency_id]) - set(tags))
+        if added:
+            log.info("%s: %s taken from the existing OSM relations", tags["network"],
+                     ", ".join(f"{k}={out[agency_id][k]}" for k in added))
+    return out
+
+
+def complete_wikis(obj, networks):
+    """Add the network:wikidata / network:wikipedia of the known networks (networks: agency_id -> network
+    tags) to the objects of the output file (obj.maps[0]: our relations and platforms, and the existing
+    relations updated by the split ways) that lack them: route relations, route masters and platforms whose
+    network, network:2... is one of them; the wiki keys get the same suffix. Values already set are kept.
+    Returns the number of objects completed."""
+    wikis = {t["network"]: {k: t[k] for k in WIKI_KEYS if t.get(k)} for t in networks.values() if t.get("network")}
+    done = 0
+    for key, o in obj.maps[0].items():
+        tags = o.get("tags", {})
+        if tags.get("type") not in ("route", "route_master") and tags.get("public_transport") != "platform":
+            continue
+        added = {f"{k}{suffix}": v for suffix in ("", *(f":{i}" for i in range(2, 10)))
+                 for k, v in wikis.get(tags.get(f"network{suffix}"), {}).items() if f"{k}{suffix}" not in tags}
+        if added:
+            obj[key] = {**o, "tags": {**tags, **added}}
+            done += 1
+    return done
+
+
 def run(network=None, refs=()):
     """Write the .osm file of the requested routes (all of them by default) and return its path.
     SelectionError if the network or a route is unknown, RuntimeError if Valhalla does not answer."""
@@ -139,9 +177,14 @@ def run(network=None, refs=()):
     obj = ChainMap({}, osm)
 
     existing = None
-    if settings.update_existing:
+    if settings.update_existing or settings.network_wiki_from_osm:
         log.info("Reading the existing route relations...")
         existing = ExistingRoutes.load()
+    if settings.network_wiki_from_osm:
+        used = {route["agency_id"] for route, _ in lines}
+        networks = {**networks, **with_wikis({a: t for a, t in networks.items() if a in used}, existing.wikis)}
+    if not settings.update_existing:
+        existing = None
     assignments, created = {}, {}
     for route, route_variants in lines:
         network_tags = networks.get(route["agency_id"]) or {"network": route["agency_id"] or "GTFS"}
@@ -152,6 +195,9 @@ def run(network=None, refs=()):
     n_ways, n_closed, n_rels = split_ways(obj)
     log.info("%d way(s) split, of which %d roundabout(s) / closed way(s); %d existing OSM relation(s) updated",
              n_ways, n_closed, n_rels)
+    n = complete_wikis(obj, networks)
+    if n:
+        log.info("network:wikidata / network:wikipedia completed on %d relation(s) / platform(s)", n)
 
     path = output_path(network, refs)
     write_osm(obj, path)
