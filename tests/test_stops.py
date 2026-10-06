@@ -43,7 +43,27 @@ def test_candidate_platforms_and_holders():
         ("n1", "Mairie", "platform", None, 49.0, 1.0002),  # 15 m
         ("n2", "Mairie", None, "A", 49.0007, 1.0),  # 78 m but holds the stop_id
         ("n3", "Mairie", "stop_position", None, 49.0, 1.0),  # never a platform
-        ("n4", "Mairie", None, None, 49.0005, 1.0),  # 55 m
+        ("n4", "Mairie", None, None, 49.0005, 1.0),  # 55 m: extended reach, to be checked
+        ("n5", "Poste", None, None, 49.0007, 1.0003),  # 81 m, other name: out of reach
+        ("n6", "MAIRIE", None, None, 49.0007, 1.0003),  # 81 m, same name: extended reach
     ]))
-    assert sorted((c["id"], c["holder"]) for c in s.platforms["A"]) == [("n1", False), ("n2", True)]
+    assert sorted((c["id"], c["holder"], c["far"]) for c in s.platforms["A"]) == [
+        ("n1", False, False), ("n2", True, False), ("n4", False, True), ("n6", False, True)]
     assert s.holders == {"A": {"n2"}}
+
+
+def test_far_platform_of_another_stop_left_out():
+    # n1 is 55 m from A but next to B: B's platform, not a candidate of A
+    stops = gtfs([("A", "", "Mairie", "", 49.0, 1.0), ("B", "", "Poste", "", 49.0006, 1.0)])
+    s = match_stops(stops, osm=osm([("n1", "Poste", None, None, 49.0005, 1.0)]))
+    assert s.platforms["A"] == [] and [c["id"] for c in s.platforms["B"]] == ["n1"]
+
+
+def test_far_platform_closer_to_a_stop_of_the_same_name():
+    # Jules Ferry (Atoumod): both GTFS directions 37 m apart and ~40 m off; the OSM platforms are closer to
+    # J1 but remain candidates of J0 (the side is checked when the platform is chosen)
+    stops = gtfs([("J0", "", "Jules Ferry", "", 49.468174, 1.044779),
+                  ("J1", "", "Jules Ferry", "", 49.468505, 1.044659)])
+    s = match_stops(stops, osm=osm([("n19", "Jules Ferry", "platform", None, 49.4688143, 1.0444221),
+                                    ("n20", "Jules Ferry", "platform", None, 49.4686988, 1.0443729)]))
+    assert sorted(c["id"] for c in s.platforms["J0"]) == ["n19", "n20"]

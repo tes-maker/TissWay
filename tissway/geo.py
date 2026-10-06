@@ -40,6 +40,13 @@ def latlon(o):
     return o["lat"], o["lon"]
 
 
+def line_distance(p, a, b):
+    """Distance from p to the line through a and b (not clamped to the segment), in metres."""
+    (ax, ay), (bx, by) = xy(a, p), xy(b, p)
+    length = math.hypot(bx - ax, by - ay)
+    return abs(ax * by - ay * bx) / length if length else math.hypot(ax, ay)
+
+
 def right_of(p, a, b):
     """Is p on the right of the directed segment a -> b (direction of travel on the way)?"""
     (ax, ay), (bx, by) = xy(a, p), xy(b, p)

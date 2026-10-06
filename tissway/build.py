@@ -11,8 +11,9 @@ from .config import settings
 from .existing import feed_key, updated_master, updated_relation
 from .geo import latlon, xy
 from .naming import master_endpoints_label, route_name
-from .osm import new_key
-from .platforms import VEHICLE, choose_platform, fix_side, kerb_side, locate_stop, materialize, travel_segment
+from .osm import is_new, new_key
+from .platforms import (VEHICLE, choose_platform, fix_side, kerb_side, locate_stop, materialize, road_distance,
+                        travel_segment)
 
 log = logging.getLogger(__name__)
 
@@ -49,10 +50,10 @@ class LineBuilder:
         self.chosen = {}
         self.missing, self.far, self.swapped, self.wrong_side, self.gaps = 0, [], [], [], set()
 
-    def locate(self, ways, stop_id, start):
-        """Spot of the stop_position of stop_id from ways[start]; beyond thresholds.stop_position_m, at the
-        nearest point of the way (reported)."""
-        pos = latlon(self.stops.df.loc[stop_id])
+    def locate(self, ways, stop_id, start, pos=None):
+        """Spot of the stop_position of stop_id (at pos, default: the GTFS position) from ways[start];
+        beyond thresholds.stop_position_m, at the nearest point of the way (reported)."""
+        pos = pos or latlon(self.stops.df.loc[stop_id])
         rivals = self.stops.positions(self.stops.rivals.get(stop_id, ()))
         spot = locate_stop(self.obj, ways, pos, start, rivals=rivals, vehicle=self.vehicle)
         if spot is None:
@@ -68,8 +69,9 @@ class LineBuilder:
             if h is None or heading is None or math.cos(h - heading) > 0:  # same way, within 90°
                 return choice
         s = self.stops.df.loc[stop_id]
-        c = choose_platform(self.stops.platforms.get(stop_id, []), latlon(s), segment, spot and spot.pos)
-        c, data_id = fix_side(stop_id, c, segment, self.stops)
+        road = lambda p: road_distance(self.obj, ways, p)
+        c = choose_platform(self.stops.platforms.get(stop_id, []), latlon(s), segment, spot and spot.pos, road)
+        c, data_id = fix_side(stop_id, c, segment, self.stops, road)
         if data_id != stop_id:
             self.swapped.append(f"{s['stop_name']} ({stop_id} -> {data_id}{', platform created' if not c else ''})")
         d = self.stops.df.loc[data_id]
@@ -88,7 +90,14 @@ class LineBuilder:
         for stop_id in v["seq"]:
             spot = self.locate(ways, stop_id, start)
             platform, data_id, platform_pos = self.choose(stop_id, ways, spot)
-            if data_id != stop_id:  # the stop_position goes in front of the platform actually used
+            # the stop_position goes in front of the platform actually used: an existing OSM platform is
+            # more accurate than the GTFS position (often tens of metres off)
+            if not is_new(platform):
+                rivals = [c["pos"] for r in self.stops.rivals.get(data_id, ())
+                          for c in self.stops.platforms.get(r, ()) if c["id"] != platform]
+                spot = locate_stop(self.obj, ways, platform_pos, start, rivals=rivals, vehicle=self.vehicle,
+                                   platform=True) or spot
+            elif data_id != stop_id:
                 spot = self.locate(ways, data_id, start) or spot
             if spot:
                 start = spot.way_index

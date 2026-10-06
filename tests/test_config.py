@@ -11,7 +11,7 @@ def test_profile_overrides_defaults_and_resolves_paths(tmp_path):
     s = config.configure(profile)
     assert s.gtfs == tmp_path / "feed.zip" and s.output_dir == tmp_path / "output_osm"
     assert s.valhalla.data_dir == tmp_path / "valhalla_data" and s.valhalla.container == "v"
-    assert s.thresholds.stop_position_m == 25 and s.thresholds.platform_m == 20
+    assert s.thresholds.stop_position_m == 25 and s.thresholds.platform_m == 30
     assert s.feed == "DE-X" and s.networks == {"A1": {"network": "N"}}
 
 

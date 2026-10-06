@@ -14,6 +14,7 @@ output_name = "atoumod"               # output file name when no network is sele
 
 feed = "FR-NOR-Atoumod"               # gtfs:route_id:FR-NOR-Atoumod, ...
 stop_ref_tags = ["ref:FR:Atoumod"]    # platform tags also holding the stop_id
+ref_from_stop_id = true               # no stop_code: ref = TCARxCAILL3 of FR:76216:ZE:TCARxCAILL3:ATOUMOD001
 modes = ["bus"]                       # GTFS route_type 3: train, tram and ferry routes are left out
 
 locality = "insee"                    # "CAEN Gare Routière": commune of the INSEE code in the stop_id

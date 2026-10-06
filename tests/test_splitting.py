@@ -100,6 +100,15 @@ def test_roundabout_only_the_travelled_part(monkeypatch):
     assert sorted(ref for ref, _ in obj["r6"]["members"]) == sorted(["wR", new_part(obj)])
 
 
+def test_roundabout_kept_whole(monkeypatch):
+    monkeypatch.setattr(splitting.settings, "split_roundabouts", False)
+    obj, (n, n_closed, _) = run({"r-1": route(["wIn", "wR", "wOut"], "s9", "s8"),
+                                 "r-2": route(["wS", "wA", "wE"], "s0", "e1")}, monkeypatch=monkeypatch)
+    assert (n, n_closed) == (1, 0)  # the street is still split
+    assert "wR" not in obj.maps[0]
+    assert ways_of(obj, "r-1") == ["wIn", "wR", "wOut"]
+
+
 @pytest.mark.parametrize("entry, exit, expected", [
     ("r1", "r1", ["a", "b"]), ("r3", "r1", ["b"]), ("r1", "r3", ["a"]),
     ("r2", "r4", ["a", "b"]),  # entry / exit between cuts (existing relation): arcs containing them

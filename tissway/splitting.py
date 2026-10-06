@@ -7,7 +7,9 @@ output file (the cuts of every route are pooled), after the relations are built,
 at the stop_positions of the termini.
 
 Open way: cut at every inner entry / exit node. Closed way (single-way roundabout...): cut at every entry /
-exit as soon as there are at least two, otherwise a route would travel all the way round.
+exit as soon as there are at least two, otherwise a route would travel all the way round. With
+split_roundabouts = false, roundabouts (junction=roundabout / circular) are left whole: the relations
+contain the full way.
 
 Every relation containing a split way gets the parts it travels instead, in travel order:
 - our relations and the existing OSM route relations: only the travelled parts, deduced from the
@@ -17,9 +19,11 @@ Every relation containing a split way gets the parts it travels instead, in trav
 The longest part (in number of nodes) keeps the id and history of the original way, as JOSM does.
 """
 
+from .config import settings
 from .osm import new_key, parent_relations
 
 ROUTE_ROLES = ("", "forward", "backward")  # roles of the travelled ways in a route relation
+ROUNDABOUTS = ("roundabout", "circular")  # junction=* values kept whole when split_roundabouts is false
 
 
 class Split:
@@ -108,12 +112,14 @@ def passages(obj, rel):
 
 def cut_nodes(obj, routes):
     """Way -> nodes where to cut it: inner entries / exits (open way) or all entries / exits (closed way)
-    of the route relations."""
+    of the route relations. Roundabouts are left out when split_roundabouts is false."""
     cuts = {}
     for key in routes:
         for _, w, entry, exit in passages(obj, obj[key]):
             nodes = obj[w]["nodes"]
             closed = nodes[0] == nodes[-1]
+            if not settings.split_roundabouts and obj[w]["tags"].get("junction") in ROUNDABOUTS:
+                continue
             if not closed and len(set(nodes)) != len(nodes):
                 continue  # way passing twice through a node: ambiguous position, not split
             inner = set(nodes) if closed else set(nodes[1:-1])

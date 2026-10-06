@@ -57,6 +57,8 @@ def cmd_routes(args):
         valhalla.ensure_running()
     if args.new_relations:
         settings.update_existing = False
+    if args.keep_roundabouts:
+        settings.split_roundabouts = False
     path = run(args.network, _refs(args.refs + args.line))
     print(f"-> {path}")
 
@@ -166,6 +168,8 @@ def parser():
     r.add_argument("--no-download", action="store_true", help="do not refresh the extract (Valhalla still managed)")
     r.add_argument("--new-relations", action="store_true",
                    help="always create new relations, even when the line already exists in OSM")
+    r.add_argument("--keep-roundabouts", action="store_true",
+                   help="do not split roundabouts: the relations contain the whole roundabout way")
     r.set_defaults(func=cmd_routes)
 
     pl = sub.add_parser("platforms", help="complete the OSM platforms of a network with its GTFS stops")

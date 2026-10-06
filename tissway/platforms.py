@@ -6,7 +6,9 @@ Rules:
   steps: locate_stop finds the spot without changing anything, and materialize creates the node there or
   reuses an existing stop_position. Splitting them lets the caller fix the side of the stop (fix_side)
   before anything is written;
-- an existing stop_position is reused when it is near the projection of the stop, unless it is closer to
+- when an existing OSM platform is used, the existing stop_position nearest to it is reused (unless it
+  clearly belongs to the platform of a rival stop), see _nearest_to_platform;
+- otherwise an existing stop_position is reused when it is near the projection of the stop, unless it is closer to
   the projection of a rival stop across the road (the opposite platform, or a stop of the same name). On a
   two-way road both directions are often drawn as one way, and the stop_position of the opposite stop may
   be within reach. Taking it would put both directions at the same spot, so a new stop_position is created,
@@ -14,6 +16,8 @@ Rules:
 - a stop_position only carries public_transport=stop_position, <vehicle>=yes and name
   (stop_position_tags): it is shared by every route on that way, whatever its network;
 - the platform is chosen on the kerb side of the way (settings.driving_side) in the direction of travel;
+- a platform found with the extended reach (thresholds.platform_far_m) is only used when it is on the kerb
+  side and next to the travelled way (verified): never across the road nor on a parallel street;
 - when the GTFS attaches the route to the opposite platform (a common error), the data of the other GTFS
   platform of the same stop is used instead (fix_side);
 - a GTFS stop_id is set on a single OSM platform (tag_platforms), even when the GTFS has a single stop for
@@ -23,11 +27,12 @@ Rules:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from itertools import chain, count
 
 from .config import settings
-from .geo import dist, interpolate, latlon, project, right_of
+from .geo import dist, interpolate, latlon, line_distance, project, right_of
 from .osm import edit, is_new, new_key
 
 VEHICLE = {"bus": "bus", "coach": "bus", "trolleybus": "trolleybus"}
@@ -117,11 +122,33 @@ def _reusable(obj, ways, run, pos, target, rivals, vehicle):
     return min(found)[1:] if found else None
 
 
-def locate_stop(obj, ways, pos, start=0, max_m=None, rivals=(), vehicle="bus"):
+def _nearest_to_platform(obj, ways, run, pos, target, rivals, vehicle):
+    """(way index, node) of the existing stop_position of the run of ways nearest to the platform at pos
+    (within thresholds.stop_position_reuse_m of its projection target), or None. A stop_position clearly
+    closer (by more than thresholds.stop_position_shared_m) to the platform of a rival stop (rivals:
+    positions of OSM platforms) is left to it."""
+    th = settings.thresholds
+    found = []
+    for j in run:
+        for n in obj[ways[j]]["nodes"]:
+            if not is_stop_position_for(obj[n]["tags"], vehicle):
+                continue
+            p = latlon(obj[n])
+            if dist(p, target) > th.stop_position_reuse_m:
+                continue
+            d = dist(p, pos)
+            if any(dist(p, r) < d - th.stop_position_shared_m for r in rivals):
+                continue
+            found.append((d, j, n))
+    return min(found)[1:] if found else None
+
+
+def locate_stop(obj, ways, pos, start=0, max_m=None, rivals=(), vehicle="bus", platform=False):
     """Spot of the stop_position of a GTFS stop at pos (lat, lon) on the first run of ways, from
     ways[start], passing within max_m (default thresholds.stop_position_m) of it, or None. Nothing is
     changed (see materialize). rivals: positions of the GTFS stops that may own an existing stop_position
-    nearby (Stops.rivals)."""
+    nearby (Stops.rivals). platform: pos is the OSM platform used, rivals the OSM platforms of the rival
+    stops; the existing stop_position nearest to it is reused (see _nearest_to_platform)."""
     max_m = settings.thresholds.stop_position_m if max_m is None else max_m
     best, run = None, []
     for i in range(start, len(ways)):
@@ -139,7 +166,7 @@ def locate_stop(obj, ways, pos, start=0, max_m=None, rivals=(), vehicle="bus"):
     nodes = obj[ways[i]]["nodes"]
     pa, pb = latlon(obj[nodes[k]]), latlon(obj[nodes[k + 1]])
     target = interpolate(pa, pb, t)
-    reuse = _reusable(obj, ways, run, pos, target, rivals, vehicle)
+    reuse = (_nearest_to_platform if platform else _reusable)(obj, ways, run, pos, target, rivals, vehicle)
     if reuse:
         j, n = reuse
         return Spot(j, latlon(obj[n]), d, node=n)
@@ -200,14 +227,35 @@ def travel_segment(obj, ways, spot):
 
 # --- platform --------------------------------------------------------------------------------------------
 
+def road_distance(obj, ways, p):
+    """Distance from p to the travelled ways (projection on their segments, not beyond their ends: a
+    platform on a street the route does not take is far from them, even next to the junction)."""
+    return _nearest_on(obj, ways, p)[0]
+
+
+def verified(candidate, segment, road=None):
+    """Can this candidate be used? Always if it is within thresholds.platform_m of the GTFS stop (or carries
+    its stop_id); found with the extended reach (far), only on the kerb side of segment (direction of
+    travel) and within thresholds.platform_road_m of the travelled ways (road: position -> distance to
+    them, see road_distance; default: distance to the line of segment)."""
+    if not candidate.get("far"):
+        return True
+    if not segment or not kerb_side(candidate["pos"], *segment):
+        return False
+    d = road(candidate["pos"]) if road else line_distance(candidate["pos"], *segment)
+    return d <= settings.thresholds.platform_road_m
+
+
 def _best(candidates, ref):
     return min(candidates, key=lambda c: (not c["holder"], dist(ref, c["pos"])), default=None)
 
 
-def choose_platform(candidates, stop, segment=None, spot_pos=None):
+def choose_platform(candidates, stop, segment=None, spot_pos=None, road=None):
     """Candidate OSM platform on the kerb side of segment (direction of travel, see travel_segment) rather
     than across the road: the one already carrying the stop_id in OSM, else the nearest to the GTFS stop,
-    or to the stop_position (spot_pos) when they all have the same name. None without candidates."""
+    or to the stop_position (spot_pos) when they all have the same name. Unverified far candidates are
+    left out (road: see verified). None without candidates."""
+    candidates = [c for c in candidates if verified(c, segment, road)]
     if segment:
         candidates = [c for c in candidates if kerb_side(c["pos"], *segment)] or candidates
         if spot_pos and len({c["name"] for c in candidates}) == 1:
@@ -215,7 +263,7 @@ def choose_platform(candidates, stop, segment=None, spot_pos=None):
     return _best(candidates, stop)
 
 
-def fix_side(stop_id, platform, segment, stops):
+def fix_side(stop_id, platform, segment, stops, road=None):
     """(platform, GTFS stop_id whose data it takes). When the GTFS attaches the route to the stop across
     the road (an error on their side), the other GTFS platform of the same stop on the kerb side
     (stops.neighbours) is used: its OSM platform on that side (the one carrying its stop_id, else the
@@ -231,7 +279,8 @@ def fix_side(stop_id, platform, segment, stops):
                    key=lambda sid: dist(pos(sid), pos(stop_id)), default=None)
     if opposite is None:
         return platform, stop_id
-    candidates = [c for c in stops.platforms.get(opposite, ()) if kerb_side(c["pos"], *segment)]
+    candidates = [c for c in stops.platforms.get(opposite, ())
+                  if kerb_side(c["pos"], *segment) and verified(c, segment, road)]
     if not candidates and platform and kerb_side(platform["pos"], *segment):
         candidates = [platform]
     return _best(candidates, pos(opposite)), opposite
@@ -244,6 +293,18 @@ def id_tags():
     return ("gtfs:stop_id", *settings.stop_ref_tags, "ref", "local_ref", "wheelchair")
 
 
+CODE_IN_ID = re.compile(r"(?:^|:)[A-Z]{2}:[^:]*:ZE:([^:]+)")  # NeTEx-style ids: "FR:<INSEE>:ZE:<code>:..."
+
+
+def stop_ref(stop, stop_id):
+    """ref of a platform: the stop_code, else (settings.ref_from_stop_id) the code of a NeTEx-style stop_id
+    ("FR:76216:ZE:TCARxCAILL3:ATOUMOD001" -> "TCARxCAILL3"), else None."""
+    if stop.get("stop_code"):
+        return stop["stop_code"]
+    m = CODE_IN_ID.search(stop_id) if settings.ref_from_stop_id else None
+    return m.group(1) if m else None
+
+
 PHYSICAL_TAGS = {"public_transport", "highway", "bus", "trolleybus", "wheelchair"}  # survey data wins
 
 
@@ -252,8 +313,8 @@ def stop_tags(stop, stop_id, network, mode="bus"):
     tags = {"public_transport": "platform", "highway": "bus_stop", VEHICLE.get(mode, "bus"): "yes",
             "name": stop["stop_name"], **network, "gtfs:stop_id": stop_id,
             **{t: stop_id for t in settings.stop_ref_tags}}
-    if stop.get("stop_code"):
-        tags["ref"] = stop["stop_code"]
+    if ref := stop_ref(stop, stop_id):
+        tags["ref"] = ref
     if stop.get("platform_code"):
         tags["local_ref"] = stop["platform_code"]
     if stop.get("wheelchair_boarding") in ("1", "2"):

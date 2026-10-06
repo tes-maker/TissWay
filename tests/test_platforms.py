@@ -15,8 +15,10 @@ from tissway.platforms import (
     locate_stop,
     materialize,
     place_stop,
+    road_distance,
     set_stop_position_tags,
     stop_position_tags,
+    stop_ref,
     tag_platforms,
     travel_segment,
 )
@@ -68,6 +70,21 @@ def make_stops(rows, neighbours=None, platforms=None, holders=None, rivals=None)
 def gtfs_stop(stop_id, code, lat, lon, name="Hopital"):
     return {"stop_id": stop_id, "stop_code": code, "stop_name": name, "wheelchair_boarding": "",
             "platform_code": "", "lat": lat, "lon": lon}
+
+
+@pytest.mark.parametrize("stop_id, code, ref", [
+    ("FR:76216:ZE:TCARxCAILL3:ATOUMOD001", "", "TCARxCAILL3"),  # no stop_code: code of the NeTEx id
+    ("FR:76216:ZE:TCARxCAILL3:ATOUMOD001", "2705028A", "2705028A"),  # stop_code wins
+    ("1234", "", None),
+])
+def test_stop_ref(stop_id, code, ref, default_settings):
+    default_settings.ref_from_stop_id = True
+    assert stop_ref(gtfs_stop(stop_id, code, 49.0, 1.0), stop_id) == ref
+
+
+def test_no_ref_from_stop_id_by_default():
+    stop_id = "FR:76216:ZE:TCARxCAILL3:ATOUMOD001"
+    assert stop_ref(gtfs_stop(stop_id, "", 49.0, 1.0), stop_id) is None
 
 
 # --- direction of travel ---------------------------------------------------------------------------------
@@ -149,6 +166,25 @@ def test_nearly_face_to_face_stops_keep_the_existing_stop_position():
 def test_rival_on_another_road_is_ignored():
     obj = with_stop_position(street(), "nSP", 49.00065, "r3")
     spot = locate_stop(obj, ["wR"], (49.0004, EAST), rivals=[(49.00065, 1.002)])  # ~150 m east
+    assert spot.node == "nSP"
+
+
+def test_stop_position_nearest_to_the_platform_is_reused():
+    # two existing stop_positions within reach: the one in front of the platform (east kerb, 49.00055)
+    obj = with_stop_position(street(), "nSP1", 49.0004, "r2")
+    obj = with_stop_position(obj, "nSP2", 49.00055, "r3")
+    spot = locate_stop(obj, ["wR"], (49.00055, EAST), platform=True)
+    assert spot.node == "nSP2"
+
+
+def test_stop_position_of_the_rival_platform_is_left_to_it():
+    # the only stop_position within reach is in front of the opposite platform (west kerb, 49.00065): ours
+    # is created in front of our platform
+    obj = with_stop_position(street(), "nSP", 49.00065, "r3")
+    spot = locate_stop(obj, ["wR"], (49.0004, EAST), rivals=[(49.00065, WEST)], platform=True)
+    assert spot.node is None and spot.pos[0] == pytest.approx(49.0004)
+    # face to face: shared
+    spot = locate_stop(obj, ["wR"], (49.00065, EAST), rivals=[(49.00065, WEST)], platform=True)
     assert spot.node == "nSP"
 
 
@@ -254,6 +290,27 @@ def test_fix_side_takes_the_sibling_on_the_kerb_side():
 def test_fix_side_without_sibling_changes_nothing():
     s = make_stops([gtfs_stop("A", "10A", 49.0005, WEST)])
     assert fix_side("A", None, ((49.0, 1.0), (49.001, 1.0)), s) == (None, "A")
+
+
+def test_far_platform_only_on_the_kerb_side_next_to_the_road():
+    segment = ((49.0, 1.0), (49.001, 1.0))  # northbound: kerb side = east
+    far = lambda pid, lon: {"id": pid, "pos": (49.0005, lon), "name": "X", "holder": False, "far": True}
+    near_west = {"id": "nW", "pos": (49.0005, WEST), "name": "X", "holder": False, "far": False}
+    assert choose_platform([far("nE", EAST)], (49.0005, 1.0), segment)["id"] == "nE"
+    assert choose_platform([far("nW2", WEST)], (49.0005, 1.0), segment) is None  # across the road
+    assert choose_platform([far("nP", 1.0005)], (49.0005, 1.0), segment) is None  # 37 m off: parallel street
+    assert choose_platform([far("nE", EAST)], (49.0005, 1.0)) is None  # side unknown
+    # on a street the route does not take (beyond the end of the travelled ways), even along the line
+    assert choose_platform([far("nE", EAST)], (49.0005, 1.0), segment, road=lambda p: 32) is None
+    # a near platform across the road is still the fallback, a far one never is
+    assert choose_platform([near_west, far("nW2", WEST)], (49.0005, 1.0), segment)["id"] == "nW"
+
+
+def test_road_distance_stops_at_the_end_of_the_travelled_ways():
+    # 15 m east of the line of wR, but 39 m beyond its end (r5, 49.001): the route does not go there
+    obj = street()
+    assert road_distance(obj, ["wR"], (49.0005, EAST)) == pytest.approx(14.6, abs=0.5)
+    assert road_distance(obj, ["wR"], (49.00135, EAST)) > 40
 
 
 def test_left_hand_traffic_platform_on_the_left(default_settings):

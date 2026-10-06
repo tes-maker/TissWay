@@ -56,8 +56,10 @@ def sibling_code(stop_code):
 class Stops:
     """GTFS stops (df indexed by stop_id, with lat / lon) and their neighbours, see match_stops."""
     df: pd.DataFrame
-    # stop_id -> candidate OSM platforms [{"id": "n123"/"w456", "pos", "name", "holder"}]: within
-    # thresholds.platform_m, or within thresholds.holder_m if they already carry this stop_id (holder=True)
+    # stop_id -> candidate OSM platforms [{"id": "n123"/"w456", "pos", "name", "holder", "far"}]: within
+    # thresholds.platform_m, or within thresholds.holder_m if they already carry this stop_id (holder=True),
+    # or within thresholds.platform_far_m / platform_same_name_m (same name) with far=True, to be checked
+    # against the road (platforms.verified), when no GTFS stop of another name is clearly closer to them
     platforms: dict
     neighbours: dict  # stop_id -> other GTFS platforms of the same stop (opposite stop)
     holders: dict  # stop_id -> OSM platforms already carrying it (gtfs:stop_id*, settings.stop_ref_tags)
@@ -101,11 +103,31 @@ def match_stops(stops, agencies=None, osm=None):
 
     platforms = {s: [] for s in stops.index}
     if len(osm):
-        for r in gpd.sjoin(gdf, osm, predicate="dwithin", distance=th.holder_m).itertuples():
+        reach = max(th.holder_m, th.platform_far_m, th.platform_same_name_m)
+        pairs = gpd.sjoin(gdf, osm, predicate="dwithin", distance=reach)
+        pairs["d"] = pairs.geometry.distance(osm.loc[pairs["index_right"], "geometry"].set_axis(pairs.index))
+        pairs["key"] = stops.loc[pairs["stop_id"], "stop_name"].map(name_key).to_numpy()
+        pairs["same"] = pairs["key"] == pairs["name"].map(lambda n: name_key(n) if isinstance(n, str) else None)
+        # distance from each OSM platform to its nearest GTFS stop of another name than the pair's stop: the
+        # nearest of all, or the second nearest name when the nearest has the pair's name
+        by_name = pairs.groupby(["index_right", "key"], as_index=False)["d"].min().sort_values("d")
+        first = by_name.groupby("index_right").nth(0).set_index("index_right")
+        second = by_name.groupby("index_right").nth(1).set_index("index_right")["d"]
+        first_key = pairs["index_right"].map(first["key"])
+        pairs["other"] = pairs["index_right"].map(first["d"]).where(
+            first_key != pairs["key"], pairs["index_right"].map(second)).fillna(float("inf"))
+        for r in pairs.itertuples():
             holder = r.id in holders.get(r.stop_id, ())
-            if holder or r.geometry.distance(osm.at[r.index_right, "geometry"]) <= th.platform_m:
+            # beyond platform_m, the platform of another stop is likely: only if no stop of another name is
+            # clearly closer to it (stops of the same name, both directions included, are left to the side
+            # check of platforms.verified)
+            far = not holder and r.d > th.platform_m
+            alone = r.d <= r.other + th.duplicate_stop_m
+            if holder or r.d <= th.platform_m or (
+                    alone and r.d <= (th.platform_same_name_m if r.same else th.platform_far_m)):
                 name = r.name if isinstance(r.name, str) else None
-                platforms[r.stop_id].append({"id": r.id, "pos": (r.lat, r.lon), "name": name, "holder": holder})
+                platforms[r.stop_id].append({"id": r.id, "pos": (r.lat, r.lon), "name": name, "holder": holder,
+                                             "far": far})
 
     parent = stops["parent_station"]
     code = stops["stop_code"].map(sibling_code)

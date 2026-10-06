@@ -28,7 +28,14 @@ DEFAULT_PROFILE = Path("tissway.toml")
 
 @dataclass
 class Thresholds:
-    platform_m: float = 20  # GTFS stop -> existing OSM platform
+    platform_m: float = 30  # GTFS stop -> existing OSM platform, taken on either side of the road
+    # Extended reach for rough GTFS coordinates: a platform between platform_m and platform_far_m (or
+    # platform_same_name_m when it has the name of the stop) is only taken when it is checked (see
+    # platforms.verified): on the kerb side of the travelled way, within platform_road_m of it, and with no
+    # GTFS stop of another name clearly closer to it.
+    platform_far_m: float = 60
+    platform_same_name_m: float = 100
+    platform_road_m: float = 25
     holder_m: float = 100  # GTFS stop -> OSM platform already carrying its stop_id (GTFS coordinates are rough)
     stop_position_m: float = 40  # GTFS stop -> travelled way (stop_position)
     # Projection of the GTFS stop on the travelled way -> existing stop_position that may be reused. Further
@@ -72,6 +79,9 @@ class Settings:
     # --- tagging ---
     feed: str = ""  # suffix of the gtfs:*:<feed> tags (PTNA feed id, e.g. "DE-BY-MVV"); empty: no suffix
     stop_ref_tags: list[str] = field(default_factory=list)  # extra platform tags holding the stop_id
+    # Platform ref without stop_code: the code of a NeTEx-style stop_id ("FR:<INSEE>:ZE:<code>:...", see
+    # platforms.stop_ref). Off by default: this code is the producer's, not always the one shown at the stop.
+    ref_from_stop_id: bool = False
     modes: list[str] = field(default_factory=lambda: ["bus", "coach", "trolleybus"])  # OSM route=* generated
     driving_side: str = "right"  # "left" in left-hand traffic countries: platforms are on the kerb side
     # agency_id (or agency_name) -> network tags, e.g. {"network": "MVV", "network:wikidata": "Q..."}. Other
@@ -81,6 +91,9 @@ class Settings:
     # --- existing relations (see existing.py) ---
     update_existing: bool = True  # update the existing OSM relations of a line instead of creating new ones
     existing_min_similarity: float = 0.4  # generated variant <-> existing relation, see existing.similarity
+
+    # --- split ways (see splitting.py) ---
+    split_roundabouts: bool = True  # False: roundabouts (junction=roundabout / circular) kept whole in the relations
 
     # --- naming ---
     locality: str = "none"  # "none" or "insee" (French commune, see naming.locality)

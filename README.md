@@ -109,7 +109,7 @@ virtual environment).
 
 | Command | Purpose |
 |---|---|
-| `routes [-n NETWORK] [-l REF…] [REF…]` | PTv2 relations of the selected lines → `<output_dir>/<network>[_<refs>].osm`. `--no-download` keeps the current extract; `--no-prepare` also leaves Valhalla alone; `--new-relations` never updates existing relations |
+| `routes [-n NETWORK] [-l REF…] [REF…]` | PTv2 relations of the selected lines → `<output_dir>/<network>[_<refs>].osm`. `--no-download` keeps the current extract; `--no-prepare` also leaves Valhalla alone; `--new-relations` never updates existing relations; `--keep-roundabouts` keeps roundabouts whole (not split) |
 | `platforms -n NETWORK [--feed ID] [--max-distance M]` | completes the existing OSM platforms (within `M` metres, default 30) with the GTFS stops of a network (`gtfs:stop_id:<feed>`, `gtfs:stop_name:<feed>`, `route_ref`), without relations → `<output_dir>/<network>_platforms.osm`; unmatched stops go to `<network>_platforms_unmatched.csv`. `--feed` defaults to the `feed` of the profile |
 | `add-via FILE.osm [-o OUT \| --in-place] [--prefix TEXT]` | adds `via …` to route relations sharing a name, with as few distinguishing stops as possible → `<file>_renamed.osm` by default. `--prefix` restricts it to names starting with `TEXT` (e.g. `'Bus 117:'`) |
 | `ptna [LIST.txt] [-n NETWORK] [-o OUT] [--title T] [--operator OP] [--ref-gtfs]` | updates (or, without a file, generates) the [PTNA](https://ptna.openstreetmap.de) route list of a network → `<output_dir>/ptna_<network>.txt`. Without `-n`, an interactive menu asks for the network, the page title and the operator. `--operator` sets the operator of every route, `--ref-gtfs` replaces the refs by the GTFS `route_short_name` |
@@ -138,6 +138,7 @@ Every key is optional; relative paths are resolved from the profile's directory.
 | `stops_cache`, `routes_cache` | `osm_bus_stops.geojsonseq`, `osm_routes.opl` | OSM platforms and route relations extracted from `pbf`; rebuilt whenever `pbf` is newer |
 | `feed` | `""` | suffix of the `gtfs:*` tags (`gtfs:route_id:<feed>`…) and PTNA feed field |
 | `stop_ref_tags` | `[]` | extra platform tags holding the `stop_id` (e.g. `ref:FR:Atoumod`) |
+| `ref_from_stop_id` | `false` | platforms without `stop_code`: `ref` = code of a NeTEx-style `stop_id` (`FR:<INSEE>:ZE:<code>:…`) |
 | `modes` | `["bus", "coach", "trolleybus"]` | OSM `route=*` values generated (from basic and extended GTFS route types) |
 | `driving_side` | `right` | `left` in left-hand traffic: platforms are picked on the kerb side |
 | `networks` | `{}` | `agency_id` (or `agency_name`) → network tags. Other agencies get `network=<agency_name>`, without the part in parentheses |
@@ -146,6 +147,7 @@ Every key is optional; relative paths are resolved from the profile's directory.
 | `fix_accents` | `false` | restore French accents commonly dropped by producers (`Gare Routiere` → `Gare Routière`, words in [data/fr_accents.txt](tissway/data/fr_accents.txt)) |
 | `update_existing` | `true` | update the existing OSM relations of a line instead of creating new ones |
 | `existing_min_similarity` | 0.4 | minimum similarity (0–1) between a generated variant and an existing relation to update it |
+| `split_roundabouts` | `true` | `false`: roundabouts (`junction=roundabout` / `circular`) are never split, the relations contain the whole way (also `routes --keep-roundabouts`) |
 | `[thresholds]` | | distances in metres, see below |
 | `[valhalla]` | | local Valhalla server, see below |
 | `[ptna]` | | `id_prefix`, `categories`, `sections`, `pages`, `text` (wiki texts replacing the English ones), see `tissway.toml` |
@@ -154,7 +156,10 @@ Thresholds:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `platform_m` | 20 | GTFS stop → existing OSM platform |
+| `platform_m` | 30 | GTFS stop → existing OSM platform, on either side of the road |
+| `platform_far_m` | 60 | extended reach: a platform up to this distance is only taken on the kerb side of the travelled way, near it (`platform_road_m`), and when no GTFS stop of another name is closer to it |
+| `platform_same_name_m` | 100 | extended reach for a platform with the name of the stop (same checks) |
+| `platform_road_m` | 25 | max distance between the travelled ways and a platform found with the extended reach (not on a parallel street, nor on a street the route does not take) |
 | `holder_m` | 100 | GTFS stop → OSM platform already carrying its `stop_id` |
 | `stop_position_m` | 40 | GTFS stop → travelled way; beyond, the stop_position goes to the nearest point and is reported |
 | `stop_position_reuse_m` | 30 | projection of the stop on the way → existing stop_position that may be reused |
@@ -192,9 +197,13 @@ The log says which variants were routed through their stops.
 
 ### stop_positions
 
-Each stop gets a stop_position on the travelled way, at the projection of the GTFS stop:
+Each stop gets a stop_position on the travelled way, in front of the existing OSM platform used (GTFS
+coordinates are often tens of metres off), else at the projection of the GTFS stop:
 
-- an existing stop_position is reused if it is within `stop_position_reuse_m` of the projection;
+- in front of an existing OSM platform, the existing stop_position nearest to that platform is reused
+  (within `stop_position_reuse_m` of its projection on the way), unless it is clearly closer to the
+  platform of the stop across the road;
+- otherwise an existing stop_position is reused if it is within `stop_position_reuse_m` of the projection;
 - **unless it belongs to the stop across the road.** On a two-way road drawn as a single way, the
   stop_position of the opposite stop is often within reach. If it is closer to the projection of a stop
   of the same name (or the opposite platform) across the road, it is left to that stop and a new
@@ -254,6 +263,9 @@ other lines, cycle routes…) get only the parts they travel, deduced from their
 dead-end part is left behind. Other relations (street, multipolygon…) get every part. Ways passing twice
 through the same node are not split, because the cut position is ambiguous.
 
+With `split_roundabouts = false` (or `routes --keep-roundabouts`), roundabouts (`junction=roundabout` /
+`circular`) are left whole: the relations contain the full roundabout way, as many mappers prefer.
+
 ### Names
 
 Relations follow `Bus <ref>: <from> → <to>`, and route masters `Bus <ref>: A ↔ B` (or `A1 / A2 ↔ B` when a
@@ -272,7 +284,7 @@ name.
 - **route_master**: `type=route_master`, `route_master=<mode>`, `ref`, `name`, network, colours,
   `gtfs:route_id`.
 - **platform**: `public_transport=platform`, `highway=bus_stop`, `bus=yes` (or `trolleybus=yes`), `name`,
-  network, `gtfs:stop_id` (+ `stop_ref_tags`), `ref` (stop_code), `local_ref` (platform_code), `wheelchair`.
+  network, `gtfs:stop_id` (+ `stop_ref_tags`), `ref` (stop_code, else with `ref_from_stop_id` the code of a NeTEx-style stop_id: `FR:76216:ZE:TCARxCAILL3:ATOUMOD001` → `TCARxCAILL3`), `local_ref` (platform_code), `wheelchair`.
 - **stop_position**: `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`), `name`.
 
 No `operator` is set: the actual operator of a line (often a subcontractor) is not reliable in GTFS
