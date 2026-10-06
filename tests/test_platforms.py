@@ -20,6 +20,11 @@ from tissway.platforms import (
     stop_position_tags,
     stop_ref,
     tag_platforms,
+    Spot,
+    kerb_side,
+    lay_by,
+    side_segment,
+    stop_segment,
     travel_segment,
 )
 from tissway.stops import Stops
@@ -311,6 +316,47 @@ def test_road_distance_stops_at_the_end_of_the_travelled_ways():
     obj = street()
     assert road_distance(obj, ["wR"], (49.0005, EAST)) == pytest.approx(14.6, abs=0.5)
     assert road_distance(obj, ["wR"], (49.00135, EAST)) > 40
+
+
+def test_side_of_a_gtfs_stop_in_a_lay_by_judged_on_the_road():
+    # Centre d'Art Contemporain (Atoumod): northbound wR; the route leaves it at r2 for an unnamed lay-by wB
+    # 15 m east (r2 - b1 - b2 - r4) and comes back to wR at r4. The spot falls on the eastward leg r2 - b1:
+    # the side is judged on wR, northwards
+    obj = street(b1=node(49.00025, 1.0002), b2=node(49.00075, 1.0002), wB=way("r2", "b1", "b2", "r4"))
+    ways = ["wR", "wB", "wR"]
+    spot = Spot(1, (49.00025, 1.0001), 0.0, a="r2", b="b1")
+    assert lay_by(obj, ways, 1)
+    a, b = stop_segment(obj, ways, spot)
+    assert a[0] < b[0] and a[1] == b[1] == 1.0
+    assert kerb_side((49.0003, 1.0003), a, b) and not kerb_side((49.0003, 0.9998), a, b)
+
+
+def test_named_street_between_two_others_is_not_a_lay_by():
+    obj = street(b1=node(49.00025, 1.0002), b2=node(49.00075, 1.0002),
+                 wB=way("r2", "b1", "b2", "r4", name="Rue Haute"))
+    assert not lay_by(obj, ["wR", "wB", "wR"], 1)
+    assert not lay_by(obj, ["wR", "wB"], 1)  # end of the route
+
+
+def test_platform_side_judged_on_the_road_next_to_it():
+    # wC runs north then turns east at c2; the stop is on the northward leg. A platform north of the
+    # eastward leg is on the left of the vehicle, although east of the prolongation of the northward leg
+    obj = ChainMap({}, {"c1": node(49.0, 1.0), "c2": node(49.0005, 1.0), "c3": node(49.0005, 1.001),
+                        "wC": way("c1", "c2", "c3")})
+    spot = Spot(0, (49.0002, 1.0), 0.0, a="c1", b="c2")
+    p = (49.00058, 1.0008)
+    assert kerb_side(p, *travel_segment(obj, ["wC"], spot))  # prolongation: wrongly on the kerb side
+    assert not kerb_side(p, *side_segment(obj, ["wC"], spot, p))
+
+
+def test_platform_between_the_road_and_a_lay_by_is_judged_on_the_road():
+    # Basilique (Nomad): the stop is on northbound wR; the route then goes through a lay-by wB 15 m east;
+    # the platform stands between them, nearer to the lay-by (on its left) but on the kerb side of wR
+    obj = street(b1=node(49.00025, 1.0002), b2=node(49.00075, 1.0002), wB=way("r2", "b1", "b2", "r4"))
+    ways = ["wR", "wB", "wR"]
+    spot = Spot(0, (49.0005, 1.0), 0.0, a="r2", b="r3")
+    p = (49.0005, 1.00014)
+    assert kerb_side(p, *side_segment(obj, ways, spot, p))
 
 
 def test_left_hand_traffic_platform_on_the_left(default_settings):

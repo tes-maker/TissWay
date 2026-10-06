@@ -160,6 +160,7 @@ Thresholds:
 | `platform_far_m` | 60 | extended reach: a platform up to this distance is only taken on the kerb side of the travelled way, near it (`platform_road_m`), and when no GTFS stop of another name is closer to it |
 | `platform_same_name_m` | 100 | extended reach for a platform with the name of the stop (same checks) |
 | `platform_road_m` | 25 | max distance between the travelled ways and a platform found with the extended reach (not on a parallel street, nor on a street the route does not take) |
+| `side_way_m` | 5 | the side of an OSM platform is judged on the road segment next to it: the way of the stop, unless a neighbouring way (not a lay-by) is closer by more than this |
 | `holder_m` | 100 | GTFS stop → OSM platform already carrying its `stop_id` |
 | `stop_position_m` | 40 | GTFS stop → travelled way; beyond, the stop_position goes to the nearest point and is reported |
 | `stop_position_reuse_m` | 30 | projection of the stop on the way → existing stop_position that may be reused |
@@ -220,6 +221,11 @@ coordinates are often tens of metres off), else at the projection of the GTFS st
 - The platform is picked on the kerb side of the way in the direction of travel. Prefer the OSM platform
   already carrying the `stop_id`, else the nearest candidate. Without a candidate, a platform is created
   at the GTFS position.
+- The side of an OSM platform is judged on the segment of the road next to it, not on the prolongation
+  of the segment of the stop (bends). A lay-by the route passes through (an unnamed or `service` way
+  between two ways of the same road) does not count, unless the vehicle stops in it. The side of a GTFS
+  stop is judged on the segment of the stop, or on the road when the stop falls on a leg of a lay-by
+  entering or leaving the road.
 - When the GTFS attaches a route to the stop across the road (a common error), the other platform of the
   same stop is used instead: same `parent_station`, or same stop code apart from a trailing letter
   (`12A`/`12B`) and served by the same agency, or simply very close. The stop_position then goes in

@@ -15,7 +15,9 @@ Rules:
   closer on the way (see _reusable);
 - a stop_position only carries public_transport=stop_position, <vehicle>=yes and name
   (stop_position_tags): it is shared by every route on that way, whatever its network;
-- the platform is chosen on the kerb side of the way (settings.driving_side) in the direction of travel;
+- the platform is chosen on the kerb side of the way (settings.driving_side) in the direction of travel:
+  judged on the road segment next to the platform (side_segment), and for the GTFS stop on the segment of
+  the stop (stop_segment), lay-bys and bends taken into account;
 - a platform found with the extended reach (thresholds.platform_far_m) is only used when it is on the kerb
   side and next to the travelled way (verified): never across the road nor on a parallel street;
 - when the GTFS attaches the route to the opposite platform (a common error), the data of the other GTFS
@@ -27,12 +29,13 @@ Rules:
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from itertools import chain, count
 
 from .config import settings
-from .geo import dist, interpolate, latlon, line_distance, project, right_of
+from .geo import dist, interpolate, latlon, line_distance, project, right_of, xy
 from .osm import edit, is_new, new_key
 
 VEHICLE = {"bus": "bus", "coach": "bus", "trolleybus": "trolleybus"}
@@ -227,20 +230,89 @@ def travel_segment(obj, ways, spot):
 
 # --- platform --------------------------------------------------------------------------------------------
 
-def road_distance(obj, ways, p):
-    """Distance from p to the travelled ways (projection on their segments, not beyond their ends: a
-    platform on a street the route does not take is far from them, even next to the junction)."""
-    return _nearest_on(obj, ways, p)[0]
+def lay_by(obj, ways, i):
+    """Is ways[i] a detour off a road and back onto it (lay-by, bus bay, service road): an unnamed or
+    service way between the same way, or two ways of the same name?"""
+    if not 0 < i < len(ways) - 1:
+        return False
+    tags = obj[ways[i]]["tags"]
+    if tags.get("name") and tags.get("highway") != "service":
+        return False
+    before, after = ways[i - 1], ways[i + 1]
+    name = obj[before]["tags"].get("name")
+    return before == after or bool(name) and name == obj[after]["tags"].get("name")
 
 
-def verified(candidate, segment, road=None):
+def _nearest_travelled(obj, ways, p, indices):
+    """(distance, segment (a, b) in the direction of travel) of the segment of ways[k], k in indices,
+    nearest to p (projection not beyond the ends of the segments)."""
+    best = (float("inf"), None)
+    for k in indices:
+        nodes = obj[ways[k]]["nodes"]
+        for a, b in zip(nodes, nodes[1:]):
+            pa, pb = latlon(obj[a]), latlon(obj[b])
+            d = project(p, pa, pb)[1]
+            if d < best[0]:
+                best = (d, (pa, pb) if forward(obj, ways, k) else (pb, pa))
+    return best
+
+
+def _cos(s, t):
+    """Cosine of the angle between the directed segments s and t."""
+    (ux, uy), (vx, vy) = xy(s[1], s[0]), xy(t[1], t[0])
+    norm = math.hypot(ux, uy) * math.hypot(vx, vy)
+    return (ux * vx + uy * vy) / norm if norm else 1.0
+
+
+def stop_segment(obj, ways, spot):
+    """Segment (a, b), in the direction of travel, on which the side of the GTFS stop is judged: the one of
+    the spot (travel_segment), or, when the spot is on a leg of a lay-by (lay_by) entering or leaving the
+    road (more than 45° off it), the segment of the road next to it: such a leg runs across the road, the
+    road gives the direction. A bus lane along the road keeps its own segment."""
+    segment = travel_segment(obj, ways, spot)
+    i = spot.way_index
+    if not lay_by(obj, ways, i):
+        return segment
+    road = _nearest_travelled(obj, ways, spot.pos, (i - 1, i + 1))[1]
+    return road if road and _cos(segment, road) < math.sqrt(0.5) else segment
+
+
+def side_segment(obj, ways, spot, p):
+    """Segment (a, b), in the direction of travel, on which the side of an OSM platform at p is judged:
+    the segment of the road at the stop nearest to the platform (a platform tens of metres away along a
+    bending road is not judged on the prolongation of the segment of the stop). The road: the way of the
+    stop and its neighbours, except other lay-bys (lay_by: a platform between the road where the vehicle
+    stops and a bus bay or a car park aisle it passes through is judged on the road); the way of the stop
+    is kept unless another one is closer by more than thresholds.side_way_m."""
+    i = spot.way_index
+    road = [k for k in range(max(i - 1, 0), min(i + 2, len(ways))) if k == i or not lay_by(obj, ways, k)]
+    best = min(road, key=lambda k: _nearest_travelled(obj, ways, p, (k,))[0]
+               - (settings.thresholds.side_way_m if k == i else 0))
+    return _nearest_travelled(obj, ways, p, (best,))[1]
+
+
+def road_distance(obj, ways, p, around=None, span=3):
+    """Distance from p to the travelled ways (ways[around - span: around + span + 1], all of them if around
+    is None). The projection stops at the ends of the segments: a platform on a street the route does not
+    take is far from them, even next to the junction."""
+    lo, hi = (0, len(ways)) if around is None else (max(around - span, 0), min(around + span + 1, len(ways)))
+    return _nearest_travelled(obj, ways, p, range(lo, hi))[0]
+
+
+def on_kerb(p, segment, side=None):
+    """Is the OSM platform at p on the kerb side: of side(p) (see side_segment), else of segment?"""
+    seg = side(p) if side else segment
+    return bool(seg) and kerb_side(p, *seg)
+
+
+def verified(candidate, segment, road=None, side=None):
     """Can this candidate be used? Always if it is within thresholds.platform_m of the GTFS stop (or carries
-    its stop_id); found with the extended reach (far), only on the kerb side of segment (direction of
-    travel) and within thresholds.platform_road_m of the travelled ways (road: position -> distance to
-    them, see road_distance; default: distance to the line of segment)."""
+    its stop_id); found with the extended reach (far), only on the kerb side (on_kerb) and within
+    thresholds.platform_road_m of the travelled ways (road: position -> distance to them, see
+    road_distance; default: distance to the line of segment)."""
     if not candidate.get("far"):
         return True
-    if not segment or not kerb_side(candidate["pos"], *segment):
+    if not segment or not on_kerb(candidate["pos"], segment, side):
         return False
     d = road(candidate["pos"]) if road else line_distance(candidate["pos"], *segment)
     return d <= settings.thresholds.platform_road_m
@@ -250,22 +322,23 @@ def _best(candidates, ref):
     return min(candidates, key=lambda c: (not c["holder"], dist(ref, c["pos"])), default=None)
 
 
-def choose_platform(candidates, stop, segment=None, spot_pos=None, road=None):
-    """Candidate OSM platform on the kerb side of segment (direction of travel, see travel_segment) rather
-    than across the road: the one already carrying the stop_id in OSM, else the nearest to the GTFS stop,
-    or to the stop_position (spot_pos) when they all have the same name. Unverified far candidates are
-    left out (road: see verified). None without candidates."""
-    candidates = [c for c in candidates if verified(c, segment, road)]
+def choose_platform(candidates, stop, segment=None, spot_pos=None, road=None, side=None):
+    """Candidate OSM platform on the kerb side (segment: direction of travel at the stop, see stop_segment;
+    side: see on_kerb) rather than across the road: the one already carrying the stop_id in OSM, else the
+    nearest to the GTFS stop, or to the stop_position (spot_pos) when they all have the same name.
+    Unverified far candidates are left out (road: see verified). None without candidates."""
+    candidates = [c for c in candidates if verified(c, segment, road, side)]
     if segment:
-        candidates = [c for c in candidates if kerb_side(c["pos"], *segment)] or candidates
+        candidates = [c for c in candidates if on_kerb(c["pos"], segment, side)] or candidates
         if spot_pos and len({c["name"] for c in candidates}) == 1:
             stop = spot_pos
     return _best(candidates, stop)
 
 
-def fix_side(stop_id, platform, segment, stops, road=None):
+def fix_side(stop_id, platform, segment, stops, road=None, side=None):
     """(platform, GTFS stop_id whose data it takes). When the GTFS attaches the route to the stop across
-    the road (an error on their side), the other GTFS platform of the same stop on the kerb side
+    the road (an error on their side, judged on segment: see stop_segment), the other GTFS platform of the
+    same stop on the kerb side
     (stops.neighbours) is used: its OSM platform on that side (the one carrying its stop_id, else the
     nearest), else the chosen platform if on that side, else None (a platform is created at its position).
     (platform, stop_id) are unchanged when the stop is already on the kerb side or when the GTFS has no
@@ -273,15 +346,17 @@ def fix_side(stop_id, platform, segment, stops, road=None):
     if not segment:
         return platform, stop_id
     pos = lambda sid: latlon(stops.df.loc[sid])
-    if kerb_side(pos(stop_id), *segment):
+    kerb = lambda p: kerb_side(p, *segment)  # GTFS stops: on the segment of the stop
+    plat = lambda p: on_kerb(p, segment, side)  # OSM platforms: on the road next to them
+    if kerb(pos(stop_id)):
         return platform, stop_id
-    opposite = min((sid for sid in stops.neighbours.get(stop_id, ()) if kerb_side(pos(sid), *segment)),
+    opposite = min((sid for sid in stops.neighbours.get(stop_id, ()) if kerb(pos(sid))),
                    key=lambda sid: dist(pos(sid), pos(stop_id)), default=None)
     if opposite is None:
         return platform, stop_id
     candidates = [c for c in stops.platforms.get(opposite, ())
-                  if kerb_side(c["pos"], *segment) and verified(c, segment, road)]
-    if not candidates and platform and kerb_side(platform["pos"], *segment):
+                  if plat(c["pos"]) and verified(c, segment, road, side)]
+    if not candidates and platform and plat(platform["pos"]):
         candidates = [platform]
     return _best(candidates, pos(opposite)), opposite
 

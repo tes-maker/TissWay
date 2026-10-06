@@ -12,8 +12,8 @@ from .existing import feed_key, updated_master, updated_relation
 from .geo import latlon, xy
 from .naming import master_endpoints_label, route_name
 from .osm import is_new, new_key
-from .platforms import (VEHICLE, choose_platform, fix_side, kerb_side, locate_stop, materialize, road_distance,
-                        travel_segment)
+from .platforms import (VEHICLE, choose_platform, fix_side, kerb_side, locate_stop, materialize, on_kerb,
+                        road_distance, side_segment, stop_segment)
 
 log = logging.getLogger(__name__)
 
@@ -61,17 +61,18 @@ class LineBuilder:
         return spot
 
     def choose(self, stop_id, ways, spot):
-        """(platform, data stop_id, platform position) of stop_id in this direction of travel, chosen at its
-        first occurrence."""
-        segment = spot and travel_segment(self.obj, ways, spot)
+        """(platform, data stop_id, platform position, on the kerb side) of stop_id in this direction of travel,
+        chosen at its first occurrence. On the kerb side: judged when choosing (None without a spot)."""
+        segment = spot and stop_segment(self.obj, ways, spot)
         heading = segment and math.atan2(*reversed(xy(segment[1], segment[0])))
         for h, choice in self.chosen.get(stop_id, ()):
             if h is None or heading is None or math.cos(h - heading) > 0:  # same way, within 90°
                 return choice
         s = self.stops.df.loc[stop_id]
-        road = lambda p: road_distance(self.obj, ways, p)
-        c = choose_platform(self.stops.platforms.get(stop_id, []), latlon(s), segment, spot and spot.pos, road)
-        c, data_id = fix_side(stop_id, c, segment, self.stops, road)
+        road = spot and (lambda p: road_distance(self.obj, ways, p, spot.way_index))
+        side = spot and (lambda p: side_segment(self.obj, ways, spot, p))
+        c = choose_platform(self.stops.platforms.get(stop_id, []), latlon(s), segment, spot and spot.pos, road, side)
+        c, data_id = fix_side(stop_id, c, segment, self.stops, road, side)
         if data_id != stop_id:
             self.swapped.append(f"{s['stop_name']} ({stop_id} -> {data_id}{', platform created' if not c else ''})")
         d = self.stops.df.loc[data_id]
@@ -80,16 +81,20 @@ class LineBuilder:
             self.obj[self.created[data_id]] = {"lat": d["lat"], "lon": d["lon"], "tags": {}}
         platform = c["id"] if c else self.created[data_id]
         pos = c["pos"] if c else latlon(d)
+        # a platform created at the GTFS position is judged as the GTFS stop, an OSM platform on the road
+        # next to it
+        kerb = bool(on_kerb(pos, segment, side) if c else kerb_side(pos, *segment)) if segment else None
         self.assignments.setdefault(data_id, {})[platform] = (self.network, pos, self.mode)
-        self.chosen.setdefault(stop_id, []).append((heading, (platform, data_id, pos)))
-        return platform, data_id, pos
+        choice = (platform, data_id, pos, kerb)
+        self.chosen.setdefault(stop_id, []).append((heading, choice))
+        return choice
 
     def variant_members(self, v):
         ways = v["ways"]
         members, start = [], 0
         for stop_id in v["seq"]:
             spot = self.locate(ways, stop_id, start)
-            platform, data_id, platform_pos = self.choose(stop_id, ways, spot)
+            platform, data_id, platform_pos, kerb = self.choose(stop_id, ways, spot)
             # the stop_position goes in front of the platform actually used: an existing OSM platform is
             # more accurate than the GTFS position (often tens of metres off)
             if not is_new(platform):
@@ -105,7 +110,7 @@ class LineBuilder:
                 if spot.distance > settings.thresholds.stop_position_m:
                     self.far.append(name)
                 members.append((materialize(self.obj, ways, spot, name, self.vehicle), "stop"))
-                if not kerb_side(platform_pos, *travel_segment(self.obj, ways, spot)):
+                if kerb is False:
                     self.wrong_side.append(name)
             else:
                 self.missing += 1

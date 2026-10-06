@@ -36,6 +36,9 @@ class Thresholds:
     platform_far_m: float = 60
     platform_same_name_m: float = 100
     platform_road_m: float = 25
+    # The side of an OSM platform is judged on the road segment next to it: the way of the stop, unless a
+    # neighbouring way (not a lay-by) is closer to the platform by more than this (see platforms.side_segment).
+    side_way_m: float = 5
     holder_m: float = 100  # GTFS stop -> OSM platform already carrying its stop_id (GTFS coordinates are rough)
     stop_position_m: float = 40  # GTFS stop -> travelled way (stop_position)
     # Projection of the GTFS stop on the travelled way -> existing stop_position that may be reused. Further
