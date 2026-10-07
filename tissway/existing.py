@@ -49,7 +49,7 @@ def feed_key(key):
 
 def stale_keys():
     """Tags describing the GTFS source of a relation: removed from an updated relation unless regenerated."""
-    return {feed_key("gtfs:shape_id"), feed_key("gtfs:trip_id:sample"), "ref_trips"}
+    return {feed_key("gtfs:shape_id"), feed_key("gtfs:trip_id:sample")}
 
 
 def _values(tags, prefix):

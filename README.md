@@ -214,8 +214,9 @@ coordinates are often tens of metres off), else at the projection of the GTFS st
 - stops facing each other (projections within `stop_position_shared_m`) share one stop_position, and
   same-name stops on the same kerb are treated as one platform (aggregated feeds list the same platform
   under several networks);
-- stop_positions only carry `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`) and
-  `name`. They are shared by every route on that way, whatever its network.
+- new stop_positions only carry `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`) and
+  `name`. They are shared by every route on that way, whatever its network. An existing stop_position
+  keeps its tags (`direction`, a `name` given for another network…): only the missing ones are added.
 
 ### Platforms
 
@@ -286,13 +287,14 @@ name.
 
 - **route**: `type=route`, `route=<mode>`, `ref`, `name`, `from`, `to`, `public_transport:version=2`,
   the network tags, `colour`/`colour:text` (if in the GTFS), `gtfs:route_id`, `gtfs:trip_id:sample`,
-  `gtfs:shape_id` (when matched from the shape), `ref_trips`. Every `gtfs:*` key carries the `:<feed>`
+  `gtfs:shape_id` (when matched from the shape). Every `gtfs:*` key carries the `:<feed>`
   suffix when `feed` is set.
 - **route_master**: `type=route_master`, `route_master=<mode>`, `ref`, `name`, network, colours,
   `gtfs:route_id`.
 - **platform**: `public_transport=platform`, `highway=bus_stop`, `bus=yes` (or `trolleybus=yes`), `name`,
   network, `gtfs:stop_id` (+ `stop_ref_tags`), `ref` (stop_code, else with `ref_from_stop_id` the code of a NeTEx-style stop_id: `FR:76216:ZE:TCARxCAILL3:ATOUMOD001` → `TCARxCAILL3`), `local_ref` (platform_code), `wheelchair`.
-- **stop_position**: `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`), `name`.
+- **stop_position**: `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`), `name`. An
+  existing stop_position keeps its tags (`direction`, `name`…): only the missing ones are added.
 
 The network tags are `network`, `network:wikidata` and `network:wikipedia`, from `networks` in the
 profile; with `network_wiki_from_osm` (default), the wiki keys a network lacks there are taken from its

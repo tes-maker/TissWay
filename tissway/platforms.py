@@ -13,8 +13,9 @@ Rules:
   two-way road both directions are often drawn as one way, and the stop_position of the opposite stop may
   be within reach. Taking it would put both directions at the same spot, so a new stop_position is created,
   closer on the way (see _reusable);
-- a stop_position only carries public_transport=stop_position, <vehicle>=yes and name
-  (stop_position_tags): it is shared by every route on that way, whatever its network;
+- a new stop_position only carries public_transport=stop_position, <vehicle>=yes and name
+  (stop_position_tags): it is shared by every route on that way, whatever its network. An existing one
+  keeps its tags (direction, name of another network...): only the missing ones are added;
 - the platform is chosen on the kerb side of the way (settings.driving_side) in the direction of travel:
   judged on the road segment next to the platform (side_segment), and for the GTFS stop on the segment of
   the stop (stop_segment), lay-bys and bends taken into account;
@@ -465,11 +466,10 @@ def stop_position_tags(name, vehicle="bus"):
 
 
 def set_stop_position_tags(obj, key, name, vehicle="bus"):
-    """Replace the tags of an existing OSM stop_position by stop_position_tags (official GTFS name), keeping
-    the other vehicles it serves."""
+    """Complete the tags of an existing OSM stop_position with stop_position_tags: its own tags (direction,
+    local_ref, a name given by another network...) are kept, only the missing ones are added."""
     old = obj[key]["tags"]
-    tags = {**{v: "yes" for v in (*VEHICLE.values(), *OTHER_VEHICLES) if old.get(v) == "yes"},
-            **stop_position_tags(name, vehicle)}
+    tags = {**stop_position_tags(name, vehicle), **old, vehicle: "yes", "public_transport": "stop_position"}
     if old != tags:
         edit(obj, key)["tags"] = tags
 

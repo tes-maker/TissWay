@@ -134,7 +134,7 @@ class LineBuilder:
                     feed_key("gtfs:trip_id:sample"): v["trip_id"]}
             if v.get("shape_id") and v.get("source", "shape") == "shape":
                 tags[feed_key("gtfs:shape_id")] = v["shape_id"]
-            tags |= {"ref_trips": v["trip_id"], "from": first["stop_name"], "to": last["stop_name"],
+            tags |= {"from": first["stop_name"], "to": last["stop_name"],
                      "public_transport:version": "2"}
             drafts.append((members, tags))
 

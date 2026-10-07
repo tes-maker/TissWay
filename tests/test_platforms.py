@@ -213,19 +213,27 @@ def test_stop_position_created_even_far_from_the_trace():
     assert obj[key]["tags"] == stop_position_tags("Hopital") and key in obj[["w1", "w2"][i]]["nodes"]
 
 
-def test_existing_stop_position_keeps_only_its_tags():
+def test_existing_stop_position_keeps_its_tags():
     obj = ChainMap({}, road())
-    obj.maps[1]["n2"]["tags"] = {"public_transport": "stop_position", "bus": "yes", "name": "Leclerc",
-                                 "ref": "DRELECL1", "network": "Linéad", "operator": "Keolis"}
+    old = {"public_transport": "stop_position", "bus": "yes", "name": "Leclerc", "direction": "forward",
+           "ref": "DRELECL1", "network": "Linéad", "gtfs:stop_id": "S1"}
+    obj.maps[1]["n2"]["tags"] = dict(old)
     set_stop_position_tags(obj, "n2", "Hôpital")
-    assert obj["n2"]["tags"] == {"bus": "yes", "name": "Hôpital", "public_transport": "stop_position"}
+    assert obj["n2"]["tags"] == old and "n2" not in obj.maps[0]
+
+
+def test_existing_stop_position_gets_the_missing_tags():
+    obj = ChainMap({}, road())
+    obj.maps[1]["n2"]["tags"] = {"highway": "bus_stop", "direction": "backward"}
+    set_stop_position_tags(obj, "n2", "Hôpital")
+    assert obj["n2"]["tags"] == {"highway": "bus_stop", "direction": "backward", **stop_position_tags("Hôpital")}
 
 
 def test_existing_stop_position_keeps_the_other_vehicles():
     obj = ChainMap({}, road())
     obj.maps[1]["n2"]["tags"] = {"public_transport": "stop_position", "tram": "yes", "name": "X"}
     set_stop_position_tags(obj, "n2", "Hôpital")
-    assert obj["n2"]["tags"] == {"tram": "yes", "bus": "yes", "name": "Hôpital", "public_transport": "stop_position"}
+    assert obj["n2"]["tags"] == {"tram": "yes", "bus": "yes", "name": "X", "public_transport": "stop_position"}
 
 
 def test_compliant_stop_position_not_modified():
