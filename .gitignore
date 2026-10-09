@@ -16,11 +16,6 @@ dist/
 *.osm
 !output_osm/.gitkeep
 
-# GTFS data
-gtfs/
-gtfs_*/
-*.zip
-
 # Generated outputs
 output_osm/
 osm_bus_stops.geojsonseq

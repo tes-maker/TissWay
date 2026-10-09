@@ -39,6 +39,21 @@ def osm_stops_cache():
     return cache
 
 
+def read_osm_stops():
+    """GeoDataFrame of the OSM stops of the cache, with the columns used here only: id, name,
+    public_transport and the tags holding stop_ids. The cache has hundreds of tag columns, most of them
+    nearly empty: reading them all costs several times the memory."""
+    path = osm_stops_cache()
+    try:
+        import pyogrio
+        fields = pyogrio.read_info(path)["fields"]
+    except ImportError:  # geopandas < 1.0 without pyogrio: every column
+        return gpd.read_file(path)
+    prefixes = ("gtfs:stop_id", *settings.stop_ref_tags)
+    return gpd.read_file(path, columns=[c for c in fields if c in ("id", "name", "public_transport")
+                                        or c.startswith(prefixes)])
+
+
 def to_metric(gdf):
     """GeoDataFrame in a local metric CRS (UTM zone of its centre): accurate distances anywhere."""
     return gdf.to_crs(gdf.estimate_utm_crs() if len(gdf) else METRIC_CRS)
@@ -85,7 +100,7 @@ def match_stops(stops, agencies=None, osm=None):
     an aggregated feed apart; osm: GeoDataFrame of the OSM stops (default: read from the cache)."""
     th = settings.thresholds
     if osm is None:
-        osm = gpd.read_file(osm_stops_cache())
+        osm = read_osm_stops()
     holders = _holders(osm)
     # a stop_position (even tagged highway=bus_stop) is never a platform
     pt = osm["public_transport"] if "public_transport" in osm else pd.Series(None, index=osm.index)

@@ -97,3 +97,19 @@ def test_line_variants_drops_sub_routes():
 def test_line_variants_without_direction_nor_shape():
     trips = pd.DataFrame({"trip_id": ["t1"], "direction_id": [""], "shape_id": [""], "stop_seq": [("a", "b")]})
     assert list(line_variants(trips)) == [("0", ("a", "b"), "", "t1")]
+
+
+def test_shapes_read_in_chunks(tmp_path, monkeypatch):
+    monkeypatch.setattr("tissway.gtfs.CHUNK_ROWS", 2)  # rows of a shape spread over several chunks
+    shapes = "shape_id, shape_pt_lat,shape_pt_lon,shape_pt_sequence\n" + "".join(
+        f"{sid},{i}.5,{i},{seq}\n" for sid, seqs in (("s1", (3, 1, 2)), ("s2", (1, 2))) for i, seq in enumerate(seqs))
+    feed = Feed(write_feed(tmp_path / "gtfs", MINIMAL | {"shapes.txt": shapes}))
+    assert feed.shapes({"s1", "nope"}) == {"s1": [(1.5, 1.0), (2.5, 2.0), (0.5, 0.0)]}
+    assert feed.shapes(set()) == {}
+
+
+def test_stop_agencies_and_stop_times_as_strings(tmp_path):
+    feed = Feed(write_feed(tmp_path / "gtfs", MINIMAL))
+    assert feed.stop_agencies() == {"A": frozenset({""}), "B": frozenset({""})}
+    st = feed.stop_times(["t1"])
+    assert st["stop_id"].map(type).eq(str).all() and st["stop_sequence"].dtype.kind == "i"

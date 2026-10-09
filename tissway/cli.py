@@ -51,15 +51,21 @@ def cmd_routes(args):
     from . import extracts, valhalla
     from .pipeline import run
 
+    started = False
     if not args.no_prepare:
         if not args.no_download:
             extracts.update(offline=False)
+        started = valhalla.container_state() is not True
         valhalla.ensure_running()
     if args.new_relations:
         settings.update_existing = False
     if args.keep_roundabouts:
         settings.split_roundabouts = False
-    path = run(args.network, _refs(args.refs + args.line))
+    try:
+        path = run(args.network, _refs(args.refs + args.line))
+    finally:
+        if started and not settings.valhalla.keep_running:  # started for this run only: memory given back
+            valhalla.stop()
     print(f"-> {path}")
 
 

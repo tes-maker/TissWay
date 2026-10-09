@@ -35,6 +35,9 @@ OPTIONAL_COLUMNS = {
 }
 
 
+CHUNK_ROWS = 200_000  # rows read at a time from a table filtered while it is read (Feed.read keep=)
+
+
 class GTFSError(Exception):
     """The feed is missing or lacks a required file or column."""
 
@@ -73,17 +76,26 @@ class Feed:
     def has(self, name):
         return self._locate(name) is not None
 
-    def read(self, name, columns=None):
+    def read(self, name, columns=None, dtype=str, keep=None):
         """Table name as a DataFrame of strings ("" for missing values), restricted to columns if given;
-        missing optional columns are added empty."""
+        missing optional columns are added empty. dtype: column types (default: all strings). keep: function
+        of a DataFrame returning the mask of the rows to keep; the file is then read in chunks, so that only
+        the kept rows are ever held in memory (large shapes.txt)."""
         where = self._locate(name)
         if where is None:
             raise GTFSError(f"{name}.txt is missing from {self.source}")
         wanted = None if columns is None else set(columns)
         handle = io.TextIOWrapper(self._zip.open(where), encoding="utf-8-sig") if self._zip else where
-        df = pd.read_csv(handle, dtype=str, keep_default_na=False, na_filter=False, skipinitialspace=True,
-                         encoding="utf-8-sig", usecols=None if wanted is None else (lambda c: c.strip() in wanted))
-        df.columns = df.columns.str.strip()
+        reader = pd.read_csv(handle, dtype=dtype, keep_default_na=False, na_filter=False, skipinitialspace=True,
+                             encoding="utf-8-sig", usecols=None if wanted is None else (lambda c: c.strip() in wanted),
+                             chunksize=None if keep is None else CHUNK_ROWS)
+        if keep is None:
+            df = reader
+            df.columns = df.columns.str.strip()
+        else:
+            with reader:
+                chunks = [c[keep(c)] for c in (c.rename(columns=str.strip) for c in reader)]
+            df = pd.concat(chunks, ignore_index=True)
         for col in OPTIONAL_COLUMNS.get(name, []) + list(wanted or []):
             if col not in df:
                 df[col] = ""
@@ -124,22 +136,28 @@ class Feed:
 
     @cached_property
     def _stop_times(self):
-        st = self.read("stop_times", ["trip_id", "stop_id", "stop_sequence"])
+        """Every stop time, kept in memory with compact types: the ids as categories (a few distinct values
+        repeated millions of times), stop_sequence as int32. A tenth of the memory of plain strings."""
+        st = self.read("stop_times", ["trip_id", "stop_id", "stop_sequence"],
+                       dtype={"trip_id": "category", "stop_id": "category", "stop_sequence": "int32"})
         return st[st["stop_id"] != ""]  # flexible trips (location_id) have no stop
 
     def stop_times(self, trip_ids=None):
-        """stop_times (trip_id, stop_id, stop_sequence as int) of trip_ids, or of every trip."""
+        """stop_times (trip_id, stop_id as strings, stop_sequence as int) of trip_ids, or of every trip."""
         st = self._stop_times
         if trip_ids is not None:
             st = st[st["trip_id"].isin(set(trip_ids))]
-        return st.assign(stop_sequence=st["stop_sequence"].astype(int))
+        return st.astype({"trip_id": str, "stop_id": str, "stop_sequence": int})
 
     def shapes(self, shape_ids):
         """shape_id -> [(lat, lon)] in sequence order, for the shape_ids found in shapes.txt."""
         if not self.has("shapes"):
             return {}
-        df = self.read("shapes", ["shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence"])
-        df = df[df["shape_id"].isin(set(shape_ids))].copy()
+        shape_ids = set(shape_ids)
+        if not shape_ids:
+            return {}
+        df = self.read("shapes", ["shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence"],
+                       keep=lambda c: c["shape_id"].isin(shape_ids))
         df["shape_pt_sequence"] = df["shape_pt_sequence"].astype(int)
         df = df.sort_values(["shape_id", "shape_pt_sequence"])
         return {sid: list(zip(g["shape_pt_lat"].astype(float), g["shape_pt_lon"].astype(float)))
@@ -150,7 +168,8 @@ class Feed:
         trip_agency = self.trips.set_index("trip_id")["route_id"].map(self.routes.set_index("route_id")["agency_id"])
         st = self._stop_times[["trip_id", "stop_id"]]
         st = st.assign(agency=st["trip_id"].map(trip_agency)).dropna(subset=["agency"])
-        return st.drop_duplicates(["stop_id", "agency"]).groupby("stop_id")["agency"].agg(frozenset).to_dict()
+        st = st.drop_duplicates(["stop_id", "agency"])
+        return st.groupby("stop_id", observed=True)["agency"].agg(frozenset).to_dict()
 
 
 def stop_sequences(trips, stop_times):

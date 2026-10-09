@@ -18,7 +18,7 @@ from .config import settings
 from .gtfs import Feed, ref_sort_key
 from .naming import agency_networks, slug
 from .osm import read_ways, write_osm
-from .stops import osm_stops_cache, to_metric
+from .stops import read_osm_stops, to_metric
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def network_stops(feed, network):
 
 def osm_platforms(crs):
     """OSM bus platforms (nodes and ways) of the extract, as centroids in crs."""
-    osm = gpd.read_file(osm_stops_cache()).to_crs(crs)
+    osm = read_osm_stops().to_crs(crs)
     osm["geometry"] = osm.geometry.centroid
     pt = osm["public_transport"] if "public_transport" in osm else pd.Series(None, index=osm.index)
     return osm[osm["id"].str[0].isin(["n", "w"]) & (pt != "stop_position")][["id", "geometry"]]

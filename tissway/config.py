@@ -64,7 +64,12 @@ class Valhalla:
     image: str = "ghcr.io/nilsnolde/docker-valhalla/valhalla:latest"
     data_dir: Path = Path("valhalla_data")
     wait_s: int = 1800  # tile building can take a long time on a large extract
-    threads: int = 8
+    # Server and tile building threads. 0: half the CPU cores, 1 to 4 (requests are sent one at a time, and
+    # each building thread costs memory).
+    threads: int = 0
+    # False: routes stops the container afterwards when it started it, freeing its memory (it is started
+    # again by the next run, in a few seconds). True: left running.
+    keep_running: bool = False
 
 
 @dataclass
@@ -78,6 +83,9 @@ class Settings:
     stops_cache: Path = Path("osm_bus_stops.geojsonseq")  # OSM platforms extracted from pbf (regenerated with it)
     routes_cache: Path = Path("osm_routes.opl")  # OSM route relations extracted from pbf (regenerated with it)
     output_name: str = "gtfs"  # output file name when no network is selected
+    # Ids read from the extract per osmium call: at most this many blocks of 4 million ids, about 4 MB of
+    # memory each (see osm.id_batches). Lower: less memory, more passes over the extract.
+    osmium_id_blocks: int = 64
 
     # --- tagging ---
     feed: str = ""  # suffix of the gtfs:*:<feed> tags (PTNA feed id, e.g. "DE-BY-MVV"); empty: no suffix

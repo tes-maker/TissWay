@@ -87,7 +87,8 @@ This installs the `tissway` command. `python -m tissway` works as well, without 
 
    `routes` first refreshes the extract (at most once a day), then starts Valhalla in Docker. When the
    extract changed, it rebuilds the routing tiles first, which can take a while the first time
-   (`docker logs -f <container>` to follow).
+   (`docker logs -f <container>` to follow). When `routes` started Valhalla itself, it stops it at the end to free
+   its memory (`keep_running` in `[valhalla]` to leave it running).
 
 With the Atoumod profile shipped in this repository:
 
@@ -135,6 +136,7 @@ Every key is optional; relative paths are resolved from the profile's directory.
 | `extracts` | `[]` | URLs of `.osm.pbf` extracts downloaded (as `<name>-<YYMMDD>.osm.pbf` in `extracts_dir`) and merged into `pbf` |
 | `extracts_dir` | `.` | folder of the downloaded extracts |
 | `output_dir`, `output_name` | `output_osm`, `gtfs` | output folder, and file name when no network is selected |
+| `osmium_id_blocks` | 64 | memory of the reads from `pbf`: each osmium call takes ids from at most this many blocks of 4 million ids (~4 MB each); lower uses less memory but more passes over the extract |
 | `stops_cache`, `routes_cache` | `osm_bus_stops.geojsonseq`, `osm_routes.opl` | OSM platforms and route relations extracted from `pbf`; rebuilt whenever `pbf` is newer |
 | `feed` | `""` | suffix of the `gtfs:*` tags (`gtfs:route_id:<feed>`…) and PTNA feed field |
 | `stop_ref_tags` | `[]` | extra platform tags holding the `stop_id` (e.g. `ref:FR:Atoumod`) |
@@ -180,7 +182,8 @@ Valhalla:
 | `container` | `valhalla` | Docker container name |
 | `image` | `ghcr.io/nilsnolde/docker-valhalla/valhalla:latest` | Docker image |
 | `data_dir` | `valhalla_data` | routing tiles and the copy of the extract |
-| `threads` | 8 | Valhalla server threads (`server_threads`) |
+| `threads` | 0 | Valhalla server and tile building threads (`server_threads`); 0: half the CPU cores, 1 to 4 |
+| `keep_running` | `false` | `false`: `routes` stops the container afterwards when it started it, freeing its memory; `true`: left running |
 | `wait_s` | 1800 | how long to wait for the server to be ready (tile building can be long) |
 
 ## How it works

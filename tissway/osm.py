@@ -24,6 +24,7 @@ from pathlib import Path
 from .config import settings
 
 MEMBER_TYPES = {"n": "node", "w": "way", "r": "relation"}
+ID_BLOCK_BITS = 22  # see id_batches
 new_ids = count(1)  # negative ids of created objects, unique within the output file
 
 
@@ -36,20 +37,32 @@ def _unescape(s):
     return re.sub(r"%([0-9a-fA-F]+)%", lambda m: chr(int(m.group(1), 16)), s)
 
 
+def id_batches(ids):
+    """ids split into the batches of read_osm: each touches at most settings.osmium_id_blocks blocks of
+    2**ID_BLOCK_BITS ids. osmium getid / getparents allocate about 4 MB per block touched, so that the ids
+    of objects scattered over a region would otherwise cost gigabytes."""
+    blocks = {}
+    for i in ids:
+        blocks.setdefault((i[0], int(i[1:]) >> ID_BLOCK_BITS), []).append(i)
+    keys = sorted(blocks)
+    step = max(1, settings.osmium_id_blocks)
+    return [[i for k in keys[s:s + step] for i in blocks[k]] for s in range(0, len(keys), step)]
+
+
 def read_osm(command, ids):
-    """Objects returned by an osmium command (getid, getparents) for these ids, keyed "n123"/"w123"/"r123"."""
+    """Objects returned by an osmium command (getid, getparents) for these ids, keyed "n123"/"w123"/"r123".
+    One osmium call per batch of id_batches (one pass over the extract each)."""
     objects = {}
-    if not ids:
-        return objects
-    with tempfile.TemporaryDirectory() as tmp:
-        Path(tmp, "ids.txt").write_text("\n".join(ids))
-        out = Path(tmp, "out.opl")
-        # exit code 1 = some ids are not in the extract (neighbouring ways outside it): harmless
-        res = subprocess.run(["osmium", *command, str(settings.pbf), "-i", str(Path(tmp, "ids.txt")),
-                              "-f", "opl", "-o", str(out)], stderr=subprocess.PIPE, text=True)
-        if res.returncode > 1:
-            raise RuntimeError(f"osmium {command[0]} failed: {res.stderr.strip()}")
-        objects = parse_opl(out.read_text())
+    for batch in id_batches(ids):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "ids.txt").write_text("\n".join(batch))
+            out = Path(tmp, "out.opl")
+            # exit code 1 = some ids are not in the extract (neighbouring ways outside it): harmless
+            res = subprocess.run(["osmium", *command, str(settings.pbf), "-i", str(Path(tmp, "ids.txt")),
+                                  "-f", "opl", "-o", str(out)], stderr=subprocess.PIPE, text=True)
+            if res.returncode > 1:
+                raise RuntimeError(f"osmium {command[0]} failed: {res.stderr.strip()}")
+            objects.update(parse_opl(out.read_text()))
     return objects
 
 
@@ -72,8 +85,13 @@ def parse_opl(text):
 
 
 def read_ways(ids):
-    """Objects of the extract with these ids, plus the nodes of the ways, keyed "n123"/"w123"."""
-    return read_osm(["getid", "-r"], ids)
+    """Objects of the extract with these ids (nodes and ways), plus the nodes of the ways, keyed
+    "n123"/"w123". The nodes are read afterwards, in their own batches (not with getid -r, which would hold
+    the ids of every node at once)."""
+    objects = read_osm(["getid"], ids)
+    nodes = {n for o in objects.values() for n in o.get("nodes", ())} - set(objects)
+    objects.update(read_osm(["getid"], nodes))
+    return objects
 
 
 def parent_relations(ids):

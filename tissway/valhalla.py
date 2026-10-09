@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import shutil
 import subprocess
 import time
@@ -86,11 +87,16 @@ def _start(args):
             "another port in [valhalla] url of the profile.") from e
 
 
+def threads():
+    """settings.valhalla.threads, or with 0 half the CPU cores, 1 to 4."""
+    return settings.valhalla.threads or max(1, min(4, (os.cpu_count() or 2) // 2))
+
+
 def create_container():
     v = settings.valhalla
     _start(["run", "-d", "--quiet", "--name", v.container, "--restart", "unless-stopped",
             "-p", f"{_port()}:8002", "-v", f"{_data_dir()}:/custom_files", "-e", "serve_tiles=True",
-            "-e", "build_admins=True", "-e", f"server_threads={v.threads}", v.image])
+            "-e", "build_admins=True", "-e", f"server_threads={threads()}", v.image])
 
 
 def wait_until_ready():
@@ -148,3 +154,9 @@ def ensure_running():
     if changed:
         stamp.write_text(f"{digest}\n")
     return changed
+
+
+def stop():
+    """Stop the container (its memory is freed; it is started again by ensure_running)."""
+    log.info("Stopping Valhalla to free its memory ([valhalla] keep_running = true to leave it running)...")
+    _docker(["stop", settings.valhalla.container], check=False)

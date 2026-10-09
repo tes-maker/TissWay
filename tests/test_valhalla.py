@@ -72,3 +72,12 @@ def test_port_in_use_gives_a_readable_error(setup, monkeypatch, default_settings
     monkeypatch.setattr(valhalla, "container_state", lambda: None)
     with pytest.raises(RuntimeError, match=r"port 8002 is already in use.*second Docker"):
         valhalla.ensure_running()
+
+
+def test_threads_follow_the_cpu_cores(monkeypatch, default_settings):
+    default_settings.valhalla.threads = 0
+    for cores, expected in ((None, 1), (2, 1), (6, 3), (32, 4)):
+        monkeypatch.setattr(valhalla.os, "cpu_count", lambda c=cores: c)
+        assert valhalla.threads() == expected
+    default_settings.valhalla.threads = 6
+    assert valhalla.threads() == 6
