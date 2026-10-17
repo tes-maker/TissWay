@@ -217,9 +217,11 @@ coordinates are often tens of metres off), else at the projection of the GTFS st
 - stops facing each other (projections within `stop_position_shared_m`) share one stop_position, and
   same-name stops on the same kerb are treated as one platform (aggregated feeds list the same platform
   under several networks);
-- new stop_positions only carry `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`) and
-  `name`. They are shared by every route on that way, whatever its network. An existing stop_position
-  keeps its tags (`direction`, a `name` given for another network…): only the missing ones are added.
+- new stop_positions only carry `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`), `name`
+  and, on a two-way way, `direction=forward|backward` (direction of travel relative to the way, removed
+  when the stop_position is shared by both directions). They are shared by every route on that way,
+  whatever its network. An existing stop_position keeps its tags (`direction`…): only the missing ones are added, except `name`, replaced by the GTFS
+  name like on the platform.
 
 ### Platforms
 
@@ -294,10 +296,12 @@ name.
   suffix when `feed` is set.
 - **route_master**: `type=route_master`, `route_master=<mode>`, `ref`, `name`, network, colours,
   `gtfs:route_id`.
-- **platform**: `public_transport=platform`, `highway=bus_stop`, `bus=yes` (or `trolleybus=yes`), `name`,
+- **platform**: `public_transport=platform`, `highway=bus_stop` (+ `trolleybus=yes` for a trolleybus), `name`,
   network, `gtfs:stop_id` (+ `stop_ref_tags`), `ref` (stop_code, else with `ref_from_stop_id` the code of a NeTEx-style stop_id: `FR:76216:ZE:TCARxCAILL3:ATOUMOD001` → `TCARxCAILL3`), `local_ref` (platform_code), `wheelchair`.
-- **stop_position**: `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`), `name`. An
-  existing stop_position keeps its tags (`direction`, `name`…): only the missing ones are added.
+- **stop_position**: `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`), `name`,
+  `direction=forward|backward` on a two-way way (not at its ends; removed if served both ways). An
+  existing stop_position keeps its tags (`direction`…): only the missing ones are added, except `name`,
+  the same as the platform's.
 
 The network tags are `network`, `network:wikidata` and `network:wikipedia`, from `networks` in the
 profile; with `network_wiki_from_osm` (default), the wiki keys a network lacks there are taken from its

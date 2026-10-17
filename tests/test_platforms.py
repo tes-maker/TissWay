@@ -19,6 +19,7 @@ from tissway.platforms import (
     set_stop_position_tags,
     stop_position_tags,
     stop_ref,
+    stop_tags,
     tag_platforms,
     Spot,
     kerb_side,
@@ -115,8 +116,37 @@ def test_locate_changes_nothing_and_materialize_inserts_the_node():
     assert spot.node is None and spot.pos[0] == pytest.approx(49.0004) and not obj.maps[0]
     key = materialize(obj, ["wR"], spot, "Hôpital")
     assert obj["wR"]["nodes"] == ["r1", "r2", key, "r3", "r4", "r5"]
-    assert obj[key]["tags"] == stop_position_tags("Hôpital")
+    assert obj[key]["tags"] == {**stop_position_tags("Hôpital"), "direction": "forward"}
     assert obj.parents["wR"]["nodes"] == ["r1", "r2", "r3", "r4", "r5"]  # extract untouched
+
+
+def test_stop_position_direction_follows_the_travel_against_node_order():
+    obj = street()
+    ways = ["wN", "wR", "wS"]  # southwards, wR drawn northwards
+    key = materialize(obj, ways, locate_stop(obj, ways, (49.0004, EAST)), "Hôpital")
+    assert obj[key]["tags"]["direction"] == "backward"
+
+
+def test_no_direction_on_a_oneway_way():
+    obj = street()
+    obj.maps[1]["wR"]["tags"]["oneway"] = "yes"
+    key = materialize(obj, ["wR"], locate_stop(obj, ["wR"], (49.0004, EAST)), "Hôpital")
+    assert "direction" not in obj[key]["tags"]
+
+
+def test_existing_direction_kept():
+    obj = with_stop_position(street(), "nSP", 49.0004, "r2")
+    obj.maps[1]["nSP"]["tags"]["direction"] = "backward"
+    spot = locate_stop(obj, ["wR"], (49.0004, EAST))
+    materialize(obj, ["wR"], spot, "Hôpital")
+    assert obj[spot.node]["tags"]["direction"] == "backward"
+
+
+def test_direction_removed_when_served_both_ways():
+    obj = street()
+    key = materialize(obj, ["wR"], locate_stop(obj, ["wR"], (49.0004, EAST)), "Hôpital")
+    materialize(obj, ["wN", "wR", "wS"], Spot(1, (obj[key]["lat"], obj[key]["lon"]), 0, node=key), "Hôpital")
+    assert "direction" not in obj[key]["tags"]
 
 
 def test_existing_stop_position_near_the_projection_is_reused():
@@ -210,16 +240,25 @@ def test_stop_position_created_even_far_from_the_trace():
     far = {"stop_name": "Hopital", "lat": 49.0005, "lon": 1.001}  # ~70 m east of the road
     assert place_stop(obj, ["w1", "w2"], far, 0) is None
     i, key = place_stop(obj, ["w1", "w2"], far, 0, max_m=float("inf"))
-    assert obj[key]["tags"] == stop_position_tags("Hopital") and key in obj[["w1", "w2"][i]]["nodes"]
+    assert obj[key]["tags"]["name"] == "Hopital" and key in obj[["w1", "w2"][i]]["nodes"]
 
 
 def test_existing_stop_position_keeps_its_tags():
     obj = ChainMap({}, road())
-    old = {"public_transport": "stop_position", "bus": "yes", "name": "Leclerc", "direction": "forward",
+    old = {"public_transport": "stop_position", "bus": "yes", "name": "Hôpital", "direction": "forward",
            "ref": "DRELECL1", "network": "Linéad", "gtfs:stop_id": "S1"}
     obj.maps[1]["n2"]["tags"] = dict(old)
     set_stop_position_tags(obj, "n2", "Hôpital")
     assert obj["n2"]["tags"] == old and "n2" not in obj.maps[0]
+
+
+def test_existing_stop_position_renamed_like_the_platform():
+    obj = ChainMap({}, road())
+    obj.maps[1]["n2"]["tags"] = {"public_transport": "stop_position", "bus": "yes", "name": "Leclerc",
+                                 "direction": "forward"}
+    set_stop_position_tags(obj, "n2", "Hôpital")
+    assert obj["n2"]["tags"] == {"public_transport": "stop_position", "bus": "yes", "name": "Hôpital",
+                                 "direction": "forward"}
 
 
 def test_existing_stop_position_gets_the_missing_tags():
@@ -233,7 +272,7 @@ def test_existing_stop_position_keeps_the_other_vehicles():
     obj = ChainMap({}, road())
     obj.maps[1]["n2"]["tags"] = {"public_transport": "stop_position", "tram": "yes", "name": "X"}
     set_stop_position_tags(obj, "n2", "Hôpital")
-    assert obj["n2"]["tags"] == {"tram": "yes", "bus": "yes", "name": "X", "public_transport": "stop_position"}
+    assert obj["n2"]["tags"] == {"tram": "yes", "bus": "yes", "name": "Hôpital", "public_transport": "stop_position"}
 
 
 def test_compliant_stop_position_not_modified():
@@ -409,6 +448,12 @@ def test_stop_id_held_by_another_osm_platform_is_not_set():
     obj = ChainMap({}, {"nE": node(49.0005, 1.0001)})
     elsewhere = tag_platforms(obj, s, {"H": {"nE": (NOMAD, (49.0005, 1.0001), "bus")}})
     assert len(elsewhere) == 1 and "gtfs:stop_id" not in obj["nE"]["tags"]
+
+
+def test_platform_tags_without_bus_yes():
+    stop = {"stop_name": "Gare"}
+    assert "bus" not in stop_tags(stop, "S1", {}, "bus") and "bus" not in stop_tags(stop, "S1", {}, "coach")
+    assert stop_tags(stop, "S1", {}, "trolleybus")["trolleybus"] == "yes"
 
 
 def test_enrich_numbers_other_networks_and_keeps_survey_tags():

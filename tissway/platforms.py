@@ -13,9 +13,11 @@ Rules:
   two-way road both directions are often drawn as one way, and the stop_position of the opposite stop may
   be within reach. Taking it would put both directions at the same spot, so a new stop_position is created,
   closer on the way (see _reusable);
-- a new stop_position only carries public_transport=stop_position, <vehicle>=yes and name
-  (stop_position_tags): it is shared by every route on that way, whatever its network. An existing one
-  keeps its tags (direction, name of another network...): only the missing ones are added;
+- a new stop_position only carries public_transport=stop_position, <vehicle>=yes, name and, on a two-way
+  way, direction=forward|backward (stop_position_tags, set_direction): it is shared by every route on that
+  way, whatever its network. An existing one keeps its tags (direction, local_ref...): only the missing
+  ones are added, except name, replaced by the official GTFS name like on the platform. A direction set
+  here is removed if the stop_position turns out to be served both ways;
 - the platform is chosen on the kerb side of the way (settings.driving_side) in the direction of travel:
   judged on the road segment next to the platform (side_segment), and for the GTFS stop on the segment of
   the stop (stop_segment), lay-bys and bends taken into account;
@@ -181,9 +183,11 @@ def locate_stop(obj, ways, pos, start=0, max_m=None, rivals=(), vehicle="bus", p
 
 def materialize(obj, ways, spot, name, vehicle="bus"):
     """Key of the stop_position of spot: the existing one, retagged (set_stop_position_tags), or a new node
-    inserted in the way."""
+    inserted in the way. Either way it gets the direction of travel (set_direction)."""
+    fwd = forward(obj, ways, spot.way_index)
     if spot.node:
         set_stop_position_tags(obj, spot.node, name, vehicle)
+        set_direction(obj, ways[spot.way_index], spot.node, fwd)
         return spot.node
     nodes = edit(obj, ways[spot.way_index])["nodes"]
     k = next(k for k in range(len(nodes) - 1) if nodes[k] == spot.a and nodes[k + 1] == spot.b)
@@ -191,7 +195,29 @@ def materialize(obj, ways, spot, name, vehicle="bus"):
     obj[key] = {"lat": spot.pos[0], "lon": spot.pos[1], "tags": stop_position_tags(name, vehicle)}
     nodes.insert(k + 1, key)
     spot.node, spot.a, spot.b = key, None, None
+    set_direction(obj, ways[spot.way_index], key, fwd)
     return key
+
+
+ONEWAY = {"yes", "1", "true", "-1", "reversible", "alternating"}
+
+
+def set_direction(obj, way, key, fwd):
+    """direction=forward|backward on the stop_position key of way: the direction of travel relative to the
+    order of the way's nodes. Only on a two-way way (a oneway one already gives it) and inside it (at an end,
+    shared with the next way, the direction would be ambiguous). A direction already in OSM is kept; one set
+    here is removed if the stop_position turns out to be served both ways (o["directions"], not written)."""
+    t, nodes = obj[way]["tags"], obj[way]["nodes"]
+    if t.get("oneway") in ONEWAY or t.get("junction") in ("roundabout", "circular") or key not in nodes[1:-1]:
+        return
+    if "direction" in obj[key]["tags"] and "directions" not in obj[key]:
+        return
+    o = edit(obj, key)
+    o.setdefault("directions", set()).add("forward" if fwd else "backward")
+    if len(o["directions"]) == 1:
+        o["tags"]["direction"] = next(iter(o["directions"]))
+    else:
+        o["tags"].pop("direction", None)
 
 
 def place_stop(obj, ways, stop, start=0, max_m=None, rivals=(), vehicle="bus"):
@@ -385,8 +411,9 @@ PHYSICAL_TAGS = {"public_transport", "highway", "bus", "trolleybus", "wheelchair
 
 
 def stop_tags(stop, stop_id, network, mode="bus"):
-    """Platform tags taken from the GTFS."""
-    tags = {"public_transport": "platform", "highway": "bus_stop", VEHICLE.get(mode, "bus"): "yes",
+    """Platform tags taken from the GTFS. No bus=yes: highway=bus_stop already implies it."""
+    vehicle = VEHICLE.get(mode, "bus")
+    tags = {"public_transport": "platform", "highway": "bus_stop", **({vehicle: "yes"} if vehicle != "bus" else {}),
             "name": stop["stop_name"], **network, "gtfs:stop_id": stop_id,
             **{t: stop_id for t in settings.stop_ref_tags}}
     if ref := stop_ref(stop, stop_id):
@@ -467,9 +494,11 @@ def stop_position_tags(name, vehicle="bus"):
 
 def set_stop_position_tags(obj, key, name, vehicle="bus"):
     """Complete the tags of an existing OSM stop_position with stop_position_tags: its own tags (direction,
-    local_ref, a name given by another network...) are kept, only the missing ones are added."""
+    local_ref...) are kept, only the missing ones are added, except name, replaced by the official GTFS name
+    like on the platform (see enrich)."""
     old = obj[key]["tags"]
-    tags = {**stop_position_tags(name, vehicle), **old, vehicle: "yes", "public_transport": "stop_position"}
+    tags = {**stop_position_tags(name, vehicle), **old, vehicle: "yes", "name": name,
+            "public_transport": "stop_position"}
     if old != tags:
         edit(obj, key)["tags"] = tags
 
