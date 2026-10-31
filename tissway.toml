@@ -6,9 +6,8 @@
 gtfs = "gtfs_atoumod"                 # directory or .zip
 pbf = "normandy-latest.osm.pbf"
 extracts = [                          # downloaded and merged into pbf by "extracts" and "routes"
-    "https://download.openstreetmap.fr/extracts/europe/france/basse_normandie-latest.osm.pbf",
-    "https://download.openstreetmap.fr/extracts/europe/france/haute_normandie-latest.osm.pbf",
-    "https://download.openstreetmap.fr/extracts/europe/france/centre-latest.osm.pbf",
+    "https://download.geofabrik.de/europe/france/basse-normandie-latest.osm.pbf",
+    "https://download.geofabrik.de/europe/france/haute-normandie-latest.osm.pbf",
 ]
 output_name = "atoumod"               # output file name when no network is selected
 

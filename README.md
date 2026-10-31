@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="tissway.svg" alt="Logo TissWay" width="360">
+</p>
+
 # TissWay
 
 Generates OpenStreetMap public transport relations (PTv2) from any GTFS feed: one `route` relation per

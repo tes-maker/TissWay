@@ -2,15 +2,18 @@
 
 Each extract is saved as <name>-<YYMMDD>.osm.pbf in settings.extracts_dir, <name> being the file name of
 its URL without "-latest.osm.pbf". An extract already downloaded today is reused unless forced; offline,
-the most recent extract already downloaded is merged.
+or when a download fails, the most recent extract already downloaded is merged.
 """
 
 from __future__ import annotations
 
 import filecmp
+import http.client
 import logging
 import shutil
 import subprocess
+import time
+import urllib.error
 import urllib.request
 from datetime import date
 from pathlib import Path
@@ -31,20 +34,40 @@ def extract_name(url):
     return name
 
 
-def download(url, path):
-    """Download url to path (through a .part file: no truncated extract if interrupted)."""
+def download(url, path, attempts=4):
+    """Download url to path (through a .part file: no truncated extract if interrupted).
+
+    Timeouts and connection errors are retried, resuming the .part file when the server accepts ranges.
+    """
     tmp = path.with_name(path.name + ".part")
+    tmp.unlink(missing_ok=True)  # a .part left by another run may come from an older "-latest" file
     log.info("Downloading %s...", url)
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=60) as res, open(tmp, "wb") as f:
-        total, done = int(res.headers.get("Content-Length", 0)), 0
-        while chunk := res.read(1 << 20):
-            f.write(chunk)
-            done += len(chunk)
+    for attempt in range(1, attempts + 1):
+        done = tmp.stat().st_size if tmp.exists() else 0
+        headers = {"User-Agent": USER_AGENT}
+        if done:
+            headers["Range"] = f"bytes={done}-"
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as res:
+                if done and res.status != 206:  # range ignored: start over
+                    done = 0
+                total = done + int(res.headers.get("Content-Length", 0))
+                with open(tmp, "ab" if done else "wb") as f:
+                    while chunk := res.read(1 << 20):
+                        f.write(chunk)
+                        done += len(chunk)
+                        if total:
+                            print(f"\r  {done / 1e6:.0f} / {total / 1e6:.0f} MB", end="", flush=True)
             if total:
-                print(f"\r  {done / 1e6:.0f} / {total / 1e6:.0f} MB", end="", flush=True)
-    if total:
-        print()
+                print()
+            break
+        except (OSError, http.client.HTTPException) as e:  # URLError, timeouts, IncompleteRead...
+            if isinstance(e, urllib.error.HTTPError) and e.code < 500 or attempt == attempts:
+                raise
+            if done:
+                print()
+            log.warning("%s (attempt %d/%d), retrying in %ds...", e, attempt, attempts, 10 * attempt)
+            time.sleep(10 * attempt)
     tmp.replace(path)
 
 
@@ -57,13 +80,19 @@ def fetch(urls, force=False, offline=False):
     for url in urls:
         name = extract_name(url)
         path = folder / f"{name}-{stamp}.osm.pbf"
+        local = sorted(folder.glob(f"{name}-[0-9][0-9][0-9][0-9][0-9][0-9].osm.pbf"))
         if offline:
-            local = sorted(folder.glob(f"{name}-[0-9][0-9][0-9][0-9][0-9][0-9].osm.pbf"))
             if not local:
                 raise RuntimeError(f"no extract {name}-<YYMMDD>.osm.pbf in {folder}")
             path = local[-1]
         elif force or not path.is_file():
-            download(url, path)
+            try:
+                download(url, path)
+            except (OSError, http.client.HTTPException) as e:
+                if not local:
+                    raise
+                path = local[-1]
+                log.warning("download of %s failed (%s): using %s", url, e, path)
         else:
             log.info("%s already downloaded today", path)
         paths.append(path)
