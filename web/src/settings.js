@@ -28,6 +28,8 @@ export const SCHEMA = [
     { key: "ref_from_stop_id", label: "Platform ref from a NeTEx stop_id", type: "select", options: [AUTO, "yes", "no"], value: AUTO, help: 'Without stop_code, ref = the code of "FR:<id>:ZE:<code>:...". "auto": when OSM platforms already follow this.' },
     { key: "stop_owners", label: "Networks owning their stops", type: "list", value: [], help: "Comma-separated, first in priority first. Their code goes in ref on a shared stop, the others in ref:<network>. Empty: the network already in place, or the one with fewer stops in the feed. Also set by the window shown before the download." },
     { key: "modes", label: "Modes generated", type: "list", value: ["bus", "coach", "trolleybus"], help: "Comma-separated OSM route=* values." },
+    { key: "colour", label: "Line colour (colour)", type: "colour", value: "", help: "#RRGGBB, on every line generated. Empty: route_color of the GTFS." },
+    { key: "colour_text", label: "Text colour (colour:text)", type: "colour", value: "", help: "#RRGGBB, on every line generated. Empty: route_text_color of the GTFS." },
     { key: "driving_side", label: "Driving side", type: "select", options: [AUTO, "right", "left"], value: AUTO, help: 'Platforms are on the kerb side. "auto": from the country of the stops (Nominatim, Wikidata).' },
   ] },
   { group: "Names", items: [

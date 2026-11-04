@@ -263,9 +263,17 @@ textarea.secret.shown { -webkit-text-security: none; }
 .ref-dialog::backdrop { background: rgb(10 14 30 / 55%); }
 .ref-dialog h2 { margin: 0; }
 .ref-dialog form .cta { width: 100%; }
-.ref-order { display: grid; gap: 6px; margin: 10px 0 0; padding: 0; list-style-position: inside; }
-.ref-order li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; }
-.ref-order li span { flex: 1; font-weight: 700; overflow-wrap: anywhere; }
+.ref-priority { display: grid; gap: 10px; }
+.ref-priority[hidden] { display: none; }
+.ref-priority h3 { margin: 0; font-size: 1.05rem; }
+.ref-order { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ref-order li { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; }
+.ref-order li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ref-order small { display: block; color: var(--muted); font-size: .86rem; }
+.ref-rank { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: .85rem; }
+.ref-order li:first-child .ref-rank { background: var(--accent); color: var(--on-accent); }
+.ref-example { margin: 0; padding: 8px 10px; border-radius: 10px; background: var(--sunken); font-size: .88rem; overflow-wrap: anywhere; }
+.ref-dialog .more .hint { margin: 6px 0; font-size: .86rem; }
 .ref-list { max-height: 180px; overflow: auto; margin: 0; padding-left: 18px; font-size: .88rem; overflow-wrap: anywhere; }
 .ref-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .ref-tools input[type=search] { flex: 1 1 180px; min-width: 0; }

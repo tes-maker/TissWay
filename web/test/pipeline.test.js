@@ -13,7 +13,7 @@ import { SelectionError, runRoutes, selectRoutes } from "../src/pipeline.js";
 import { runPlatforms } from "../src/platform_tags.js";
 import { buildList } from "../src/ptna.js";
 import { clearCaches } from "../src/net.js";
-import { settings } from "../src/settings.js";
+import { configure, settings } from "../src/settings.js";
 
 const GTFS = {
   "agency.txt": "agency_id,agency_name\nAG,Bustown (Ville)\n",
@@ -93,6 +93,14 @@ test("selectRoutes: modes, network, refs, and readable errors", () => {
   assert.deepEqual(selectRoutes(routes, networks, "bustown", ["10"]).map((r) => r.route_id), ["R2"]);
   assert.throws(() => selectRoutes(routes, networks, "Nope"), SelectionError);
   assert.throws(() => selectRoutes(routes, networks, null, ["99"]), /99.*Available lines: 2, 10/);
+});
+
+test("the colours of the settings replace those of the GTFS", async () => {
+  configure({ colour: "#00ff00", colour_text: "ffffff" });
+  const { xml } = await runRoutes(await open(), { network: "Bustown", ref: "R1" });
+  const t = tags(parseXml(xml).children.find((e) => e.name === "relation" && e.attrs.id === "30"));
+  assert.equal(t.colour, "#00ff00");
+  assert.equal(t["colour:text"], "#ffffff");
 });
 
 test("runRoutes: a line from GTFS to .osm", async () => {

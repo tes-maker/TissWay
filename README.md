@@ -9,6 +9,8 @@ variant, a `route_master` per line, stop_positions on the road, platforms beside
 [Valhalla](https://github.com/valhalla/valhalla). Lines already in OSM are updated in place rather than duplicated.
 Everything goes into a single `.osm` file that you review in JOSM and then upload.
 
+**Use it online: <https://tes-maker.github.io/TissWay/>**
+
 It is a static site in plain JavaScript: no server, no dependency, no build step.
 
 ```bash
@@ -138,7 +140,7 @@ Platforms, stop_positions and `from`/`to` keep the official GTFS name, unless yo
 They follow the OSM wiki's [Public transport](https://wiki.openstreetmap.org/wiki/Public_transport) page and PTNA's checks.
 
 - **route**: `type=route`, `route=<mode>`, `ref`, `name`, `from`, `to`, `via` and `roundtrip=yes` when needed, `duration`,
-  `public_transport:version=2`, the network tags, `colour`/`colour:text` (if in the GTFS), `gtfs:route_id`, `gtfs:trip_id:sample`,
+  `public_transport:version=2`, the network tags, `colour`/`colour:text` (from Settings, else from the GTFS), `gtfs:route_id`, `gtfs:trip_id:sample`,
   `gtfs:shape_id` (when matched from the shape). Every `gtfs:*` key carries the `:<feed>` suffix when a feed code is known.
 - **route_master**: `type=route_master`, `route_master=<mode>`, `ref`, `name`, network, colours, `gtfs:route_id`.
 - **platform**: `public_transport=platform`, `highway=bus_stop` on a node (`highway=platform` on a way), `bus=yes` (or `trolleybus=yes`),
