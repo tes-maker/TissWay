@@ -68,6 +68,11 @@ function parseValue(item, input) {
       if (typeof v !== "object" || v === null || Array.isArray(v)) throw new Error("Enter a JSON object.");
       return v;
     }
+    case "colour": {
+      const colour = input.value.trim();
+      if (colour && !/^#?[0-9A-Fa-f]{6}$/.test(colour)) throw new Error("Enter a colour as #RRGGBB, or nothing.");
+      return colour && `#${colour.replace("#", "").toUpperCase()}`;
+    }
     case "url": {
       const url = input.value.trim();
       if (!/^https?:\/\/[^\s]+$/.test(url)) throw new Error("Enter an http(s) URL.");

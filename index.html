@@ -130,7 +130,7 @@
     <p id="summary" class="summary"></p>
     <p class="hint">Review the file in JOSM before uploading it: nothing is sent to OpenStreetMap from here.</p>
     <button id="show-warnings" class="warnings" hidden></button>
-    <button id="show-refs" class="small" hidden>Manage ref priorities</button>
+    <button id="show-refs" class="small" hidden>Review stop refs</button>
     <details id="detected-box" class="more" hidden>
       <summary>Found online for this run</summary>
       <dl id="detected" class="pairs"></dl>
@@ -143,17 +143,21 @@
   </section>
 
   <dialog id="ref-dialog" class="ref-dialog" aria-labelledby="ref-title">
-    <h2 id="ref-title">Ref priorities</h2>
-    <div id="ref-priority">
-      <p class="hint">On a stop shared by several networks, the first network gets <code>ref</code> and the others <code>ref:&lt;network&gt;</code>. Your order is kept for the next conversions.</p>
+    <h2 id="ref-title">Check the stop refs</h2>
+    <section id="ref-priority" class="ref-priority" aria-labelledby="ref-priority-title">
+      <h3 id="ref-priority-title">Ref priorities</h3>
+      <p class="hint">A stop used by several networks has only one <code>ref</code>. It goes to the highest network in this list that uses the stop; the others get <code>ref:&lt;network&gt;</code>. Use the arrows to change the order: it is kept for the next conversions.</p>
       <ol id="ref-order" class="ref-order"></ol>
-    </div>
+      <p id="ref-example" class="ref-example"></p>
+    </section>
     <details id="ref-corrected-box" class="more" open>
       <summary>Corrected automatically <span id="ref-corrected-count" class="count"></span></summary>
+      <p class="hint">Already changed in the file: nothing to do.</p>
       <ul id="ref-corrected" class="ref-list"></ul>
     </details>
     <details id="ref-check-box" class="more" open>
       <summary>To check in JOSM <span id="ref-check-count" class="count warn"></span></summary>
+      <p class="hint">Left as they are, because they could not be settled safely.</p>
       <ul id="ref-check" class="ref-list"></ul>
     </details>
     <details id="ref-obsolete-box" class="more" open>
@@ -169,6 +173,7 @@
     </details>
     <details id="ref-shared-box" class="more">
       <summary>Shared stops <span id="ref-shared-count" class="count"></span></summary>
+      <p class="hint">The refs as they will be written in the file, with the order above.</p>
       <ul id="ref-shared" class="ref-list"></ul>
     </details>
     <form method="dialog"><button class="cta">Apply and continue to the download</button></form>

@@ -145,6 +145,16 @@ export function sharedPlatforms(review) {
   });
 }
 
+/** What the order gives each network, in that order: [{network, tag, shared, holds}]. tag: its ref when it is not first on a stop.
+ * shared: shared platforms it is on. holds: those where it has ref. */
+export function priorityRows(review) {
+  const shared = platformKeys(review.obj).map((key) => review.obj.get(key).tags).filter((t) => networksOf(t).length > 1);
+  return review.order.map((network) => {
+    const on = shared.filter((t) => networksOf(t).includes(network));
+    return { network, tag: refKeyFor("ref", network), shared: on.length, holds: on.filter((t) => t.network === network).length };
+  });
+}
+
 const REF_TAG = /^(?:ref(?::|$)|gtfs:stop_(?:id|code)(?::|$))/;
 
 /** Why this value is obsolete, "" if nothing says so. */

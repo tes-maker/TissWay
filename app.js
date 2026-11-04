@@ -8,7 +8,7 @@ import { clearCaches, downloadGtfs, feedUrls, services } from "./src/net.js";
 import { runRoutes } from "./src/pipeline.js";
 import { writeOsm } from "./src/osm.js";
 import { runPlatforms } from "./src/platform_tags.js";
-import { applyPriority, listRefs, removeRef, restoreRef, sharedPlatforms } from "./src/ref_review.js";
+import { applyPriority, listRefs, priorityRows, removeRef, restoreRef, sharedPlatforms } from "./src/ref_review.js";
 import { buildList, loadNetworks, refKey } from "./src/ptna.js";
 import { settings } from "./src/settings.js";
 import { log, sortedBy } from "./src/util.js";
@@ -89,7 +89,11 @@ async function task(fn) {
 }
 
 const progress = (message) => { $("progress").textContent = message; };
-const el = (tag, props = {}) => Object.assign(document.createElement(tag), props);
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+};
 
 /** Show the files to download, and what the run found. */
 function showResult({ files, preview = null, summary = {}, detected = [], warningsBefore = 0 }) {
@@ -131,20 +135,41 @@ function fillList(id, items) {
 function showReview() {
   const { order, corrected, toCheck } = state.review;
   $("ref-priority").hidden = order.length < 2;
-  $("ref-order").replaceChildren(...order.map((network, i) => {
+  $("ref-order").replaceChildren(...priorityRows(state.review).map((row, i) => {
+    const { network } = row;
     const li = el("li");
     const move = (label, step, disabled) => {
-      const button = el("button", { type: "button", className: "small", textContent: label, disabled, ariaLabel: `${network}: ${step < 0 ? "up" : "down"}` });
+      const button = el("button", { type: "button", className: "small", textContent: label, disabled, ariaLabel: `Move ${network} ${step < 0 ? "up" : "down"}` });
       button.addEventListener("click", () => moveNetwork(i, step));
       return button;
     };
-    li.append(el("span", { textContent: network }), move("↑", -1, i === 0), move("↓", 1, i === order.length - 1));
+    li.append(el("b", { className: "ref-rank", textContent: i + 1, ariaHidden: "true" }),
+      el("span", {}, el("b", { textContent: network }), el("small", {}, ...priorityEffect(row))),
+      move("↑", -1, i === 0), move("↓", 1, i === order.length - 1));
     return li;
   }));
+  showExample();
   fillList("ref-corrected", corrected);
   fillList("ref-check", toCheck);
   showShared();
   showRefRows();
+}
+
+const code = (text) => el("code", { textContent: text });
+
+/** What the order gives a network, as nodes: "ref on 34 of 40 shared stops, ref:Nomad on the other 6". */
+function priorityEffect({ tag, shared, holds }) {
+  const stops = shared === 1 ? "its shared stop" : shared === 2 ? "both shared stops" : `all ${shared} shared stops`;
+  if (holds === shared) return [code("ref"), ` on ${stops}`];
+  if (!holds) return [code(tag), ` on ${stops}`];
+  return [code("ref"), ` on ${holds} of ${shared} shared stops, `, code(tag), ` on the other${shared - holds === 1 ? "" : "s"}`];
+}
+
+/** A real stop of the file, to see what the order does. */
+function showExample() {
+  const example = sharedPlatforms(state.review).map((p) => ({ ...p, refs: p.refs.filter(([k]) => k.startsWith("ref")) })).find((p) => p.refs.length > 1);
+  $("ref-example").hidden = !example;
+  if (example) $("ref-example").replaceChildren("Example, ", el("b", { textContent: example.name }), ": ", ...example.refs.flatMap(([k, v], i) => [...(i ? [", "] : []), code(`${k}=${v}`)]));
 }
 
 function showShared() {

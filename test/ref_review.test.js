@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import "./helpers.js";
 import { Store } from "../src/osm.js";
-import { applyPriority, listRefs, networksOf, removeRef, restoreRef, reviewRefs } from "../src/ref_review.js";
+import { applyPriority, listRefs, networksOf, priorityRows, removeRef, restoreRef, reviewRefs } from "../src/ref_review.js";
 import { settings } from "../src/settings.js";
 
 const TWISTO_ID = "FR:14118:ZE:chuo02:ATOUMOD029", NOMAD_ID = "FR:14118:ZE:1151928:ATOUMOD040";
@@ -166,4 +166,16 @@ test("a removed ref comes back, in the place of its network even after a change 
 
 test("networksOf: network first, then by number", () => {
   assert.deepEqual(networksOf({ "network:10": "C", "network:2": "B", network: "A" }), ["A", "B", "C"]);
+});
+
+test("priorityRows says what the order gives each network, and follows it", () => {
+  const [review] = reviewed({ ...SHARED, ref: "chuo02", "ref:Nomad": "14CAE74A" });
+  const row = (network) => priorityRows(review).find((r) => r.network === network);
+  applyPriority(review, ["Twisto", "Nomad"]);
+  assert.deepEqual(priorityRows(review).map((r) => r.network), ["Twisto", "Nomad"]);
+  assert.deepEqual(row("Twisto"), { network: "Twisto", tag: "ref:Twisto", shared: 1, holds: 1 });
+  assert.deepEqual(row("Nomad"), { network: "Nomad", tag: "ref:Nomad", shared: 1, holds: 0 });
+  applyPriority(review, ["Nomad", "Twisto"]);
+  assert.equal(row("Nomad").holds, 1);
+  assert.equal(row("Twisto").holds, 0);
 });

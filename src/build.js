@@ -14,8 +14,8 @@ const HEX_COLOUR = /^#?([0-9A-Fa-f]{6})$/;
 /** Tags shared by the route relations and the route_master of a line. */
 function routeTags(route, network) {
   const tags = { ...network };
-  for (const [gtfsKey, osmKey] of [["route_color", "colour"], ["route_text_color", "colour:text"]]) {
-    const m = HEX_COLOUR.exec((route[gtfsKey] || "").trim());
+  for (const [gtfsKey, setting, osmKey] of [["route_color", "colour", "colour"], ["route_text_color", "colour_text", "colour:text"]]) {
+    const m = HEX_COLOUR.exec((settings[setting] || route[gtfsKey] || "").trim());
     if (m) tags[osmKey] = `#${m[1]}`;
   }
   tags[feedKey("gtfs:route_id")] = route.route_id;
