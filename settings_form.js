@@ -1,6 +1,6 @@
 // The Settings page, generated from SCHEMA (src/settings.js). Only what differs from the defaults is kept, in this browser.
 
-import { ITEMS, SCHEMA, configure, settings } from "./src/settings.js";
+import { ITEMS, SCHEMA, SECTIONS, configure, settings } from "./src/settings.js";
 
 const STORE = "tissway.settings";
 const fieldOf = new Map(); // key -> {read, write, row, error}
@@ -194,7 +194,7 @@ async function importSettings(file, status) {
     const data = JSON.parse(await file.text());
     configure(data); // refuses an unknown key
     overrides = { ...data };
-    for (const section of ["thresholds", "services"]) {
+    for (const section of SECTIONS) {
       for (const [k, v] of Object.entries(overrides[section] || {})) overrides[`${section}.${k}`] = v;
       delete overrides[section];
     }

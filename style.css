@@ -257,3 +257,22 @@ textarea.secret.shown { -webkit-text-security: none; }
   .setting { grid-template-columns: minmax(0, 1fr); }
   .setting-toggle, .setting .link { justify-self: start; }
 }
+
+/* Ref priorities, before the download */
+.ref-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); border: 1px solid var(--line); border-radius: 14px; padding: 20px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.ref-dialog[open] { display: grid; gap: 14px; }
+.ref-dialog::backdrop { background: rgb(10 14 30 / 55%); }
+.ref-dialog h2 { margin: 0; }
+.ref-dialog form .cta { width: 100%; }
+.ref-order { display: grid; gap: 6px; margin: 10px 0 0; padding: 0; list-style-position: inside; }
+.ref-order li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 10px; }
+.ref-order li span { flex: 1; font-weight: 700; overflow-wrap: anywhere; }
+.ref-list { max-height: 180px; overflow: auto; margin: 0; padding-left: 18px; font-size: .88rem; overflow-wrap: anywhere; }
+.ref-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.ref-tools input[type=search] { flex: 1 1 180px; min-width: 0; }
+.ref-rows { display: grid; gap: 4px; max-height: 240px; overflow: auto; margin: 0; padding: 0; list-style: none; font-size: .88rem; }
+.ref-rows:empty { display: none; }
+.ref-rows li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.ref-rows span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ref-rows small { display: block; color: var(--warn); }
+.ref-rows .removed span { color: var(--muted); text-decoration: line-through; }

@@ -9,6 +9,8 @@ import { Grid, bbox, latlon } from "./geo.js";
 import { refSortKey } from "./gtfs.js";
 import { agencyNetworks, slug } from "./naming.js";
 import { Store, completeWayNodes, platformsIn, writeOsm } from "./osm.js";
+import { stopNetworks } from "./pipeline.js";
+import { reviewRefs } from "./ref_review.js";
 import { settings } from "./settings.js";
 import { addStopValue, nameNumberedRefs } from "./platforms.js";
 import { osmPlatforms } from "./stops.js";
@@ -80,11 +82,12 @@ export async function runPlatforms(feed, { network, feedId = null, max_m = 30, o
     if (!sameTags(tags, osm[id].tags)) obj.set(id, { ...osm[id], tags });
   }
   await completeWayNodes(obj);
+  const review = reviewRefs(obj, { ...await stopNetworks(feed, agencyNetworks(await feed.agency())), stops: await feed.stops(), feed: suffix });
   const missing = stops.filter((s) => !matches.has(s.stop_id));
   const columns = ["stop_id", "stop_code", "stop_name", "stop_lat", "stop_lon"];
   const csv = `${[columns.join(","), ...missing.map((s) => columns.map((c) => csvCell(s[c] || "")).join(","))].join("\n")}\n`;
   log.info(`${stops.length} GTFS stops: ${matches.size} paired with an OSM platform (<= ${max_m} m), ${obj.modified.size} platform(s) modified`);
   log.info(`${missing.length} stop(s) without a nearby OSM platform`);
   const base = `${slug(network)}_platforms`;
-  return { xml: writeOsm(obj), filename: `${base}.osm`, csv, csvName: `${base}_unmatched.csv`, detected: suffix ? [["Suffix of the gtfs:* tags", suffix]] : [], summary: { stops: stops.length, paired: matches.size, missing: missing.length } };
+  return { xml: writeOsm(obj), review, filename: `${base}.osm`, csv, csvName: `${base}_unmatched.csv`, detected: suffix ? [["Suffix of the gtfs:* tags", suffix]] : [], summary: { stops: stops.length, paired: matches.size, missing: missing.length } };
 }

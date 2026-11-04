@@ -490,11 +490,11 @@ function addTag(t, key, value) {
 }
 
 const NUMBERED_REF = /^((?:local_)?ref(?::.*?)?)((?::\d+)+)$/;
-const NETWORK_KEYS = ["network", "network:wikidata", "network:wikipedia"];
+export const NETWORK_KEYS = ["network", "network:wikidata", "network:wikipedia"];
 const isRefKey = (key) => /^(?:ref|local_ref)$/.test(key) || settings.stop_ref_tags.includes(key);
 
 /** Key of a ref for a network that does not own the stop: "ref:Nomad", "ref:FR:Atoumod:Nomad". */
-const refKeyFor = (base, network) => `${base}:${network.trim().replace(/\s+/g, "_").replace(/[^\p{L}\p{N}_.-]/gu, "")}`;
+export const refKeyFor = (base, network) => `${base}:${network.trim().replace(/\s+/g, "_").replace(/[^\p{L}\p{N}_.-]/gu, "")}`;
 
 const STOP_KEY = /^gtfs:stop_(?:id|name|code)(?::|$)/;
 
@@ -545,17 +545,20 @@ export function nameNumberedRefs(t, stop = null) {
   }
 }
 
-/** Does this network take over the refs of a stop from the network in place? Those listed in settings.stop_owners do, and without a list
+/** Does this network take over the refs of a stop from the network in place? Those listed in settings.stop_owners do, the first ones before the next, and without a list
  * the one with fewer stops in the feed: a local network owns its stops, a regional one only calls at them. sizes: network -> stops. */
 function takesOver(network, current, sizes) {
   const owners = settings.stop_owners;
-  if (owners.length) return owners.includes(network) && !owners.includes(current);
+  if (owners.length) {
+    const rank = (n) => (owners.includes(n) ? owners.indexOf(n) : Infinity);
+    return rank(network) < rank(current);
+  }
   const [a, b] = [sizeOf(sizes, network), sizeOf(sizes, current)];
   return a !== undefined && b !== undefined && a < b;
 }
 
 /** Stops of a network in the feed. The feed may name it longer than OSM: "Nomad Car" for "Nomad". */
-function sizeOf(sizes, network) {
+export function sizeOf(sizes, network) {
   if (!sizes) return undefined;
   if (sizes.has(network)) return sizes.get(network);
   const longer = [...sizes.keys()].filter((name) => name.startsWith(`${network} `)).map((name) => sizes.get(name));

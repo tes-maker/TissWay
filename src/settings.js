@@ -5,6 +5,9 @@
 // values are replaced during a run by what is detected from the online services (see detect.js). A number has a unit, shown on the page.
 
 const AUTO = "auto";
+const capitalized = (s) => s[0].toUpperCase() + s.slice(1);
+const NAMED_MODES = ["bus", "coach", "trolleybus", "tram", "train", "subway", "ferry", "monorail", "funicular", "aerialway"];
+export const SECTIONS = ["thresholds", "services", "prefixes"];
 
 export const SCHEMA = [
   { group: "API keys and servers", intro: "Stored in this browser only, and only sent to the service they belong to.", items: [
@@ -23,7 +26,7 @@ export const SCHEMA = [
     { key: "feed", label: "Suffix of the gtfs:* tags", type: "text", value: AUTO, help: '"auto": the code OSM relations already use with the route_ids of this feed (gtfs:route_id:<code>). Empty: no suffix.' },
     { key: "stop_ref_tags", label: "Extra tags holding the stop_id", type: "list", value: [], help: "Comma-separated, on top of the ref:* tags detected in OSM." },
     { key: "ref_from_stop_id", label: "Platform ref from a NeTEx stop_id", type: "select", options: [AUTO, "yes", "no"], value: AUTO, help: 'Without stop_code, ref = the code of "FR:<id>:ZE:<code>:...". "auto": when OSM platforms already follow this.' },
-    { key: "stop_owners", label: "Networks owning their stops", type: "list", value: [], help: "Comma-separated. Their code goes in ref on a shared stop, the others in ref:<network>. Empty: the network already in place, or the one with fewer stops in the feed." },
+    { key: "stop_owners", label: "Networks owning their stops", type: "list", value: [], help: "Comma-separated, first in priority first. Their code goes in ref on a shared stop, the others in ref:<network>. Empty: the network already in place, or the one with fewer stops in the feed. Also set by the window shown before the download." },
     { key: "modes", label: "Modes generated", type: "list", value: ["bus", "coach", "trolleybus"], help: "Comma-separated OSM route=* values." },
     { key: "driving_side", label: "Driving side", type: "select", options: [AUTO, "right", "left"], value: AUTO, help: 'Platforms are on the kerb side. "auto": from the country of the stops (Nominatim, Wikidata).' },
   ] },
@@ -31,6 +34,8 @@ export const SCHEMA = [
     { key: "stop_names", label: "Stop names", type: "select", options: ["gtfs", "town"], value: "gtfs", help: '"gtfs": the official name of the feed. "town": "TOWN - Stop", on platforms, stop_positions, from and to; a town already in the name is moved first, never repeated (one Nominatim call per stop). The titles of the lines are "Bus 12: VILLE Arret → VILLE Arret" either way.' },
     { key: "fix_accents", label: "Restore dropped accents", type: "boolean", value: true, help: "From the spelling of nearby OSM platforms, else from Wiktionary in the language of the feed. Every change is listed in the log." },
   ] },
+  { group: "Start of the line names", intro: 'What comes before the ref in the names of the relations, by mode of the GTFS line: "Car Nomad" gives "Car Nomad 12: A → B". Empty: the default.', items:
+    NAMED_MODES.map((mode) => ({ key: `prefixes.${mode}`, label: capitalized(mode), type: "text", value: capitalized(mode), help: `Lines with route=${mode}.` })) },
   { group: "Relations and ways", items: [
     { key: "update_existing", label: "Update existing relations", type: "boolean", value: true, help: "Off: always create new relations, even when the line is already in OSM." },
     { key: "existing_min_similarity", label: "Minimum similarity with an existing relation", type: "number", unit: "0 to 1", value: 0.4, min: 0, max: 1, step: 0.05, help: "Below this, a variant is not paired with an existing relation." },
@@ -67,7 +72,7 @@ const parts = (key) => {
   return b ? [a, b] : [null, a];
 };
 
-export const settings = { thresholds: {}, services: {} };
+export const settings = Object.fromEntries(SECTIONS.map((section) => [section, {}]));
 
 function setValue(key, value) {
   const [section, name] = parts(key);
@@ -84,7 +89,7 @@ export function configure(overrides = {}) {
     setValue(key, value);
   };
   for (const [key, value] of Object.entries(overrides)) {
-    if (key === "thresholds" || key === "services") for (const [k, v] of Object.entries(value)) apply(`${key}.${k}`, v);
+    if (SECTIONS.includes(key)) for (const [k, v] of Object.entries(value)) apply(`${key}.${k}`, v);
     else apply(key, value);
   }
   return settings;

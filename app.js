@@ -6,7 +6,9 @@ import { Feed } from "./src/gtfs.js";
 import { agencyNetworks, slug } from "./src/naming.js";
 import { clearCaches, downloadGtfs, feedUrls, services } from "./src/net.js";
 import { runRoutes } from "./src/pipeline.js";
+import { writeOsm } from "./src/osm.js";
 import { runPlatforms } from "./src/platform_tags.js";
+import { applyPriority, listRefs, removeRef, restoreRef, sharedPlatforms } from "./src/ref_review.js";
 import { buildList, loadNetworks, refKey } from "./src/ptna.js";
 import { settings } from "./src/settings.js";
 import { log, sortedBy } from "./src/util.js";
@@ -106,12 +108,111 @@ function showResult({ files, preview = null, summary = {}, detected = [], warnin
   $("detected-box").hidden = !detected.length;
   $("preview-box").hidden = preview === null;
   $("preview").value = preview ?? "";
+  $("show-refs").hidden = !state.review;
   $("result").hidden = false;
   $("result").focus({ preventScroll: true });
   $("result").scrollIntoView({ block: "nearest" });
 }
 
+/** The window before the download, when the file has shared stops or refs that were corrected or are to check. */
+function offerReview(review, show) {
+  state.review = review;
+  state.showReviewed = show;
+  show();
+  if (review.order.length > 1 || review.corrected.length || review.toCheck.length || listRefs(review).some((r) => r.reason)) openReview();
+}
+
+function fillList(id, items) {
+  $(id).replaceChildren(...items.map((text) => el("li", { textContent: text })));
+  $(`${id}-box`).hidden = !items.length;
+  $(`${id}-count`).textContent = items.length;
+}
+
+function showReview() {
+  const { order, corrected, toCheck } = state.review;
+  $("ref-priority").hidden = order.length < 2;
+  $("ref-order").replaceChildren(...order.map((network, i) => {
+    const li = el("li");
+    const move = (label, step, disabled) => {
+      const button = el("button", { type: "button", className: "small", textContent: label, disabled, ariaLabel: `${network}: ${step < 0 ? "up" : "down"}` });
+      button.addEventListener("click", () => moveNetwork(i, step));
+      return button;
+    };
+    li.append(el("span", { textContent: network }), move("↑", -1, i === 0), move("↓", 1, i === order.length - 1));
+    return li;
+  }));
+  fillList("ref-corrected", corrected);
+  fillList("ref-check", toCheck);
+  showShared();
+  showRefRows();
+}
+
+function showShared() {
+  fillList("ref-shared", sharedPlatforms(state.review).map(({ key, name, refs }) => `${name} (${key}): ${refs.map(([k, v]) => `${k}=${v}`).join(", ") || "no ref"}`));
+}
+
+const MAX_REF_ROWS = 200; // the Platforms format can give thousands of refs: the search narrows them
+
+function refRow(row, label, action) {
+  const li = el("li");
+  const text = el("span", { textContent: `${row.name} (${row.platform}): ${row.tag}=${row.value}` });
+  if (row.reason) text.append(el("small", { textContent: row.reason }));
+  const button = el("button", { type: "button", className: "small", textContent: label, ariaLabel: `${label} ${row.tag}=${row.value} of ${row.name}` });
+  button.addEventListener("click", () => {
+    action(state.review, row);
+    state.reviewChanged = true;
+    showShared();
+    showRefRows();
+  });
+  li.append(text, button);
+  return li;
+}
+
+/** The obsolete refs proposed, or all of them, and those removed. */
+function showRefRows() {
+  const rows = listRefs(state.review), proposed = rows.filter((r) => r.reason);
+  const words = $("ref-search").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = ($("ref-show-all").checked ? rows : proposed).filter((r) => words.every((w) => `${r.name} ${r.platform} ${r.tag} ${r.value}`.toLowerCase().includes(w)));
+  $("ref-obsolete-box").hidden = !rows.length && !state.review.removed.length;
+  $("ref-obsolete-count").textContent = proposed.length;
+  $("ref-remove-all").hidden = !proposed.length;
+  $("ref-obsolete-hint").textContent = [proposed.length ? "Proposed from the GTFS, nothing is removed until you ask." : "The GTFS shows no obsolete ref. Those of other networks cannot be judged: show every ref to remove one by hand.",
+    shown.length > MAX_REF_ROWS ? `First ${MAX_REF_ROWS} of ${shown.length}: search to narrow them.` : ""].filter(Boolean).join(" ");
+  $("ref-rows").replaceChildren(...shown.slice(0, MAX_REF_ROWS).map((row) => refRow(row, "Remove", removeRef)));
+  $("ref-removed").replaceChildren(...state.review.removed.map((row) => {
+    const li = refRow(row, "Restore", restoreRef);
+    li.classList.add("removed");
+    return li;
+  }));
+}
+
+function moveNetwork(i, step) {
+  const order = [...state.review.order];
+  [order[i], order[i + step]] = [order[i + step], order[i]];
+  applyPriority(state.review, order);
+  state.reviewMoved = true;
+  state.reviewChanged = true;
+  showReview();
+}
+
+function openReview() {
+  showReview();
+  $("ref-dialog").showModal();
+}
+
+/** The window is closed: the file follows what it shows, and the order chosen is kept for the next conversions. */
+function closeReview() {
+  if (state.reviewMoved) {
+    const { order } = state.review;
+    setOption("stop_owners", order); // resets what the run detected: the review has kept what it needs
+    log.info(`Ref priority: ${order.join(" > ")}`);
+  }
+  if (state.reviewChanged) state.showReviewed();
+  state.reviewMoved = state.reviewChanged = false;
+}
+
 function hideResult() {
+  state.review = null;
   $("result").hidden = true;
   showError("");
 }
@@ -289,13 +390,13 @@ async function exportRoutes() {
   const warningsBefore = state.warnings;
   const result = await runRoutes(state.feed, { network, ref: line.route_id, onProgress: progress });
   window.tissway.last = result.state;
-  showResult({ files: [{ name: result.filename, text: result.xml, type: OSM_TYPE }], summary: result.summary, detected: result.detected, warningsBefore });
+  offerReview(result.review, () => showResult({ files: [{ name: result.filename, text: writeOsm(result.review.obj), type: OSM_TYPE }], summary: result.summary, detected: result.detected, warningsBefore }));
 }
 
 async function exportPlatforms() {
   const warningsBefore = state.warnings;
   const result = await runPlatforms(state.feed, { network: selectedNetwork(), max_m: Number($("platforms-distance").value) || 30, onProgress: progress });
-  showResult({ files: [{ name: result.filename, text: result.xml, type: OSM_TYPE }, { name: result.csvName, text: result.csv, type: "text/csv" }], summary: result.summary, detected: result.detected, warningsBefore });
+  offerReview(result.review, () => showResult({ files: [{ name: result.filename, text: writeOsm(result.review.obj), type: OSM_TYPE }, { name: result.csvName, text: result.csv, type: "text/csv" }], summary: result.summary, detected: result.detected, warningsBefore }));
 }
 
 async function exportPtna() {
@@ -415,6 +516,16 @@ function wire() {
     });
   }
 
+  $("show-refs").addEventListener("click", openReview);
+  $("ref-dialog").addEventListener("close", closeReview);
+  $("ref-show-all").addEventListener("change", showRefRows);
+  $("ref-search").addEventListener("input", showRefRows);
+  $("ref-remove-all").addEventListener("click", () => {
+    for (const row of listRefs(state.review).filter((r) => r.reason)) removeRef(state.review, row);
+    state.reviewChanged = true;
+    showShared();
+    showRefRows();
+  });
   $("split-roundabouts").addEventListener("change", (e) => setOption("split_roundabouts", e.target.checked));
   for (const radio of document.querySelectorAll("[name=stop_names]")) radio.addEventListener("change", () => setOption("stop_names", radio.value));
   $("verbose").addEventListener("change", (e) => $("journal").classList.toggle("verbose", e.target.checked));
