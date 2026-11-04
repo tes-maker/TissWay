@@ -27,6 +27,7 @@ export const SCHEMA = [
     { key: "stop_ref_tags", label: "Extra tags holding the stop_id", type: "list", value: [], help: "Comma-separated, on top of the ref:* tags detected in OSM." },
     { key: "ref_from_stop_id", label: "Platform ref from a NeTEx stop_id", type: "select", options: [AUTO, "yes", "no"], value: AUTO, help: 'Without stop_code, ref = the code of "FR:<id>:ZE:<code>:...". "auto": when OSM platforms already follow this.' },
     { key: "stop_owners", label: "Networks owning their stops", type: "list", value: [], help: "Comma-separated, first in priority first. Their code goes in ref on a shared stop, the others in ref:<network>. Empty: the network already in place, or the one with fewer stops in the feed. Also set by the window shown before the download." },
+    { key: "network_merges", label: "Merged network names", type: "json", value: {}, help: 'Name -> the name replacing it, false to keep it apart: {"Nomad Car": "Nomad", "TER Express": false}. Also set by the window shown before the download, which asks when two names are very close.' },
     { key: "modes", label: "Modes generated", type: "list", value: ["bus", "coach", "trolleybus"], help: "Comma-separated OSM route=* values." },
     { key: "colour", label: "Line colour (colour)", type: "colour", value: "", help: "#RRGGBB, on every line generated. Empty: route_color of the GTFS." },
     { key: "colour_text", label: "Text colour (colour:text)", type: "colour", value: "", help: "#RRGGBB, on every line generated. Empty: route_text_color of the GTFS." },

@@ -143,7 +143,12 @@
   </section>
 
   <dialog id="ref-dialog" class="ref-dialog" aria-labelledby="ref-title">
-    <h2 id="ref-title">Check the stop refs</h2>
+    <h2 id="ref-title" tabindex="-1" autofocus>Check the stop refs</h2>
+    <section id="ref-merge" class="ref-priority" aria-labelledby="ref-merge-title">
+      <h3 id="ref-merge-title">Same network?</h3>
+      <p class="hint">These names are very close. Yes: everything goes under the first name, with one <code>ref</code> per stop. Your answers are kept for the next conversions, and can be changed in Settings.</p>
+      <ul id="ref-merges" class="ref-order"></ul>
+    </section>
     <section id="ref-priority" class="ref-priority" aria-labelledby="ref-priority-title">
       <h3 id="ref-priority-title">Ref priorities</h3>
       <p class="hint">A stop used by several networks has only one <code>ref</code>. It goes to the highest network in this list that uses the stop; the others get <code>ref:&lt;network&gt;</code>. Use the arrows to change the order: it is kept for the next conversions.</p>

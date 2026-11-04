@@ -261,7 +261,7 @@ textarea.secret.shown { -webkit-text-security: none; }
 .ref-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); border: 1px solid var(--line); border-radius: 14px; padding: 20px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
 .ref-dialog[open] { display: grid; gap: 14px; }
 .ref-dialog::backdrop { background: rgb(10 14 30 / 55%); }
-.ref-dialog h2 { margin: 0; }
+.ref-dialog h2 { margin: 0; outline: none; }
 .ref-dialog form .cta { width: 100%; }
 .ref-priority { display: grid; gap: 10px; }
 .ref-priority[hidden] { display: none; }

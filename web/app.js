@@ -8,7 +8,7 @@ import { clearCaches, downloadGtfs, feedUrls, services } from "./src/net.js";
 import { runRoutes } from "./src/pipeline.js";
 import { writeOsm } from "./src/osm.js";
 import { runPlatforms } from "./src/platform_tags.js";
-import { applyPriority, listRefs, priorityRows, removeRef, restoreRef, sharedPlatforms } from "./src/ref_review.js";
+import { applyPriority, closeNetworks, keepNetworkApart, listRefs, mergeNetworks, priorityRows, removeRef, restoreRef, sharedPlatforms } from "./src/ref_review.js";
 import { buildList, loadNetworks, refKey } from "./src/ptna.js";
 import { settings } from "./src/settings.js";
 import { log, sortedBy } from "./src/util.js";
@@ -123,7 +123,7 @@ function offerReview(review, show) {
   state.review = review;
   state.showReviewed = show;
   show();
-  if (review.order.length > 1 || review.corrected.length || review.toCheck.length || listRefs(review).some((r) => r.reason)) openReview();
+  if (closeNetworks(review).length || review.order.length > 1 || review.corrected.length || review.toCheck.length || listRefs(review).some((r) => r.reason)) openReview();
 }
 
 function fillList(id, items) {
@@ -134,6 +134,7 @@ function fillList(id, items) {
 
 function showReview() {
   const { order, corrected, toCheck } = state.review;
+  showMerges();
   $("ref-priority").hidden = order.length < 2;
   $("ref-order").replaceChildren(...priorityRows(state.review).map((row, i) => {
     const { network } = row;
@@ -156,6 +157,30 @@ function showReview() {
 }
 
 const code = (text) => el("code", { textContent: text });
+
+/** The networks with very close names, each with its question. */
+function showMerges() {
+  const pairs = closeNetworks(state.review);
+  $("ref-merge").hidden = !pairs.length;
+  $("ref-merges").replaceChildren(...pairs.map(({ keep, drop, keepCount, dropCount }) => {
+    const answer = (label, ariaLabel, action) => {
+      const button = el("button", { type: "button", className: "small", textContent: label, ariaLabel });
+      button.addEventListener("click", () => {
+        action();
+        showReview();
+      });
+      return button;
+    };
+    return el("li", {},
+      el("span", {}, el("b", { textContent: `${keep} / ${drop}` }), el("small", { textContent: `${keep} on ${keepCount} object${keepCount === 1 ? "" : "s"}, ${drop} on ${dropCount}` })),
+      answer("Yes", `Merge ${drop} into ${keep}`, () => {
+        mergeNetworks(state.review, keep, drop);
+        state.reviewChanged = true;
+        if (settings.stop_owners.includes(drop)) state.reviewMoved = true;
+      }),
+      answer("No", `Keep ${drop} and ${keep} apart`, () => keepNetworkApart(state.review, drop)));
+  }));
+}
 
 /** What the order gives a network, as nodes: "ref on 34 of 40 shared stops, ref:Nomad on the other 6". */
 function priorityEffect({ tag, shared, holds }) {
@@ -227,6 +252,10 @@ function openReview() {
 
 /** The window is closed: the file follows what it shows, and the order chosen is kept for the next conversions. */
 function closeReview() {
+  if (Object.keys(state.review.decisions).length) {
+    setOption("network_merges", { ...settings.network_merges, ...state.review.decisions });
+    state.review.decisions = {};
+  }
   if (state.reviewMoved) {
     const { order } = state.review;
     setOption("stop_owners", order); // resets what the run detected: the review has kept what it needs
