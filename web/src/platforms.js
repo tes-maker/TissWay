@@ -463,9 +463,10 @@ function platformRefs(obj, owners, assignments) {
     const t = o.tags;
     if (!t || (t.public_transport !== "platform" && t.highway !== "bus_stop")) continue;
     const named = { ...t };
+    nameNumberedNetworkTags(named);
     nameNumberedRefs(named);
     for (const [k, v] of Object.entries(named)) {
-      const network = k === "ref" ? t.network : k.startsWith("ref:") ? networkOfRefKey(k, t) : null;
+      const network = k === "ref" ? named.network : k.startsWith("ref:") ? networkOfRefKey(k, named) : null;
       if (network && !changing.has(`${key}\u0001${network}`) && !out.has(`${network}\u0001${v}`)) out.set(`${network}\u0001${v}`, key);
     }
   }
@@ -489,6 +490,7 @@ function addTag(t, key, value) {
   }
 }
 
+const splitValues = (value) => (value ?? "").split(";").map((v) => v.trim()).filter(Boolean);
 const NUMBERED_REF = /^((?:local_)?ref(?::.*?)?)((?::\d+)+)$/;
 export const NETWORK_KEYS = ["network", "network:wikidata", "network:wikipedia"];
 const isRefKey = (key) => /^(?:ref|local_ref)$/.test(key) || settings.stop_ref_tags.includes(key);
@@ -497,8 +499,38 @@ const isRefKey = (key) => /^(?:ref|local_ref)$/.test(key) || settings.stop_ref_t
 export const refKeyFor = (base, network) => `${base}:${network.trim().replace(/\s+/g, "_").replace(/[^\p{L}\p{N}_.-]/gu, "")}`;
 export const networkKeyFor = (base, network) => refKeyFor(base, network);
 
+/** A platform exported by this tool has network=a;b: during processing each network has its own tag, like network:2, and its metadata its name (see outputPlatformTags). */
+function splitNetworkLists(t) {
+  const names = splitValues(t.network);
+  if (names.length < 2) return;
+  const taken = Object.keys(t).filter((k) => /^network:\d+$/.test(k)).map((k) => Number(k.slice(8)));
+  let number = Math.max(1, ...taken);
+  t.network = names[0];
+  for (const name of names.slice(1)) t[`network:${++number}`] = name;
+  for (const key of NETWORK_KEYS.slice(1)) {
+    const values = splitValues(t[key]);
+    if (values.length !== names.length) continue;
+    t[key] = values[0];
+    names.slice(1).forEach((name, i) => { t[networkKeyFor(key, name)] = values[i + 1]; });
+  }
+}
+
+/** Key of the ref of a network on these tags: the one it already has, under a shorter name if need be (ref:Nomad for Nomad Car, unless Nomad is on the platform too), else refKeyFor. */
+export function refKeyOn(t, base, network) {
+  const key = refKeyFor(base, network);
+  if (key in t) return key;
+  const words = network.trim().split(/\s+/);
+  const present = Object.keys(t).filter((k) => /^network(?::\d+)?$/.test(k)).map((k) => t[k]);
+  for (let n = words.length - 1; n > 0; n--) {
+    const short = words.slice(0, n).join(" ");
+    if (!present.includes(short) && refKeyFor(base, short) in t) return refKeyFor(base, short);
+  }
+  return key;
+}
+
 /** Network-specific metadata and stop codes use the network name, not the number of its network tag. */
 export function nameNumberedNetworkTags(t) {
+  splitNetworkLists(t);
   const numbered = Object.keys(t).filter((k) => /^network:\d+$/.test(k)).sort((a, b) => Number(a.slice(8)) - Number(b.slice(8)));
   const names = new Map(numbered.map((k) => [k.slice("network:".length), t[k]]));
   for (const key of Object.keys(t)) {
@@ -587,7 +619,7 @@ export function sizeOf(sizes, network) {
 function changeOwner(t, suffix, old) {
   const incoming = t[`network${suffix}`];
   for (const key of new Set(["ref", "local_ref", ...settings.stop_ref_tags])) {
-    const other = refKeyFor(key, incoming);
+    const other = refKeyOn(t, key, incoming);
     const [a, b] = [t[key], t[other]];
     delete t[key];
     delete t[other];
@@ -623,8 +655,8 @@ function changeOwner(t, suffix, old) {
  * sizes: see takesOver. */
 export function enrich(obj, key, tags, sizes = null, ofStop = new Map()) {
   const t = obj.edit(key).tags;
-  nameNumberedRefs(t, key);
   nameNumberedNetworkTags(t);
+  nameNumberedRefs(t, key);
   tidyStopKeys(t, ofStop);
   const stopNameKey = feedKey("gtfs:stop_name");
   if (t[stopNameKey]) {
@@ -649,7 +681,7 @@ export function enrich(obj, key, tags, sizes = null, ofStop = new Map()) {
     else if (k === "highway" && key[0] === "w") t.highway ??= "platform"; // highway=bus_stop is for nodes only (wiki, PTNA)
     else if (k.startsWith("network")) continue;
     else if (PHYSICAL_TAGS.has(k)) t[k] ??= v;
-    else if (isRefKey(k)) t[suffix ? refKeyFor(k, incoming) : k] = v; // the GTFS gives the ref of this network: one value
+    else if (isRefKey(k)) t[suffix ? refKeyOn(t, k, incoming) : k] = v; // the GTFS gives the ref of this network: one value
     else if (STOP_KEY.test(k)) {
       const target = k.startsWith("gtfs:stop_code") && t.network && incoming !== t.network ? networkKeyFor(k, incoming) : k;
       addStopValue(t, target, v);

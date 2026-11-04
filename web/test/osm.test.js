@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import "./helpers.js";
 import { Store, fromOverpass, parseXml, writeOsm } from "../src/osm.js";
+import { enrich } from "../src/platforms.js";
+import { reviewRefs } from "../src/ref_review.js";
 import { nearestPairs, feedTags } from "../src/platform_tags.js";
-import { configure } from "../src/settings.js";
+import { configure, settings } from "../src/settings.js";
 
 test("fromOverpass", () => {
   const out = fromOverpass([
@@ -89,6 +91,33 @@ test("writeOsm: gtfs:stop_id follows the network holding ref", () => {
   // the only id known stays, even of the second network; no ref to tell: the last one
   assert.equal(exported({ ...shared, "gtfs:stop_id:F": NOMAD, "ref:Nomad": "1151885" })["gtfs:stop_id"], NOMAD);
   assert.equal(exported({ ...shared, "gtfs:stop_id:F": `${NOMAD};${OTHER}` })["gtfs:stop_id"], OTHER);
+});
+
+test("Mont Coco: the id of the stop holding ref, whichever networks were run, the other one stays in its refs", () => {
+  const TWISTO = "FR:14118:ZE:chuo02:ATOUMOD029", NOMAD = "FR:14118:ZE:1151928:ATOUMOD040", FEED = "FR-NOR-Atoumod";
+  const COCO = { alt_name: "Mont Coco", bench: "no", bin: "no", bus: "yes", departures_board: "timetable", "gtfs:stop_code:FR-NOR-Atoumod:Nomad": "14CAE74A",
+    "gtfs:stop_id": NOMAD, highway: "bus_stop", name: "Mont Coco", network: "Twisto;Nomad Car", "network:wikidata": "Q3537947;Q98131290",
+    "network:wikipedia": "fr:Transports en commun de Caen;fr:Nomad (réseau)", operator: "RATP Dev Caen la mer", public_transport: "platform", ref: "chuo02",
+    "ref:FR:Atoumod": TWISTO, "ref:FR:Atoumod:Nomad": NOMAD, "ref:Nomad": "14CAE74A", shelter: "no", tactile_paving: "no", wheelchair: "no" };
+  const { "gtfs:stop_code:FR-NOR-Atoumod:Nomad": code, ...expected } = { ...COCO, "gtfs:stop_id": TWISTO };
+  const ofStop = new Map([[TWISTO, new Set(["Twisto"])], [NOMAD, new Set(["Nomad Car"])]]);
+  const stops = [{ stop_id: TWISTO, stop_code: "chuo02", stop_lat: "49", stop_lon: "1" }, { stop_id: NOMAD, stop_code: "14CAE74A", stop_lat: "49", stop_lon: "1" }];
+  const run = (network, id, ref) => ({ name: "Mont Coco", network, [`gtfs:stop_id:${FEED}`]: id, [`gtfs:stop_code:${FEED}`]: ref, "ref:FR:Atoumod": id, ref });
+  const twisto = run("Twisto", TWISTO, "chuo02"), nomad = run("Nomad Car", NOMAD, "14CAE74A");
+  const saved = [settings.feed, settings.stop_ref_tags, settings.stop_owners];
+  [settings.feed, settings.stop_ref_tags, settings.stop_owners] = [FEED, ["ref:FR:Atoumod"], []];
+  const exported = (runs) => {
+    const obj = new Store({ n1: { version: "3", lat: 49, lon: 1, tags: { ...COCO } } });
+    obj.edit("n1");
+    for (const tags of runs) enrich(obj, "n1", tags, null, ofStop);
+    reviewRefs(obj, { ofStop, stops, feed: FEED });
+    const out = Object.fromEntries(parseXml(writeOsm(obj)).children[0].children.map((tag) => [tag.attrs.k, tag.attrs.v]));
+    delete out[`gtfs:stop_code:${FEED}`]; // the code of the first network, when a run gives it
+    return out;
+  };
+  for (const runs of [[], [twisto], [nomad], [twisto, nomad], [nomad, twisto]]) assert.deepEqual(exported(runs), expected);
+  assert.deepEqual(exported([twisto]), exported([twisto, nomad]));
+  [settings.feed, settings.stop_ref_tags, settings.stop_owners] = saved;
 });
 
 test("writeOsm: only the stop code of the first network", () => {

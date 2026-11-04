@@ -51,8 +51,8 @@ export function nearestPairs(stops, platforms, max_m) {
 /** Platform tags completed with the GTFS stop. */
 export function feedTags(tags, stop, feedId, network = tags.network) {
   const t = { ...tags }, suffix = feedId ? `:${feedId}` : "";
-  nameNumberedRefs(t, stop.stop_id);
   nameNumberedNetworkTags(t);
+  nameNumberedRefs(t, stop.stop_id);
   addStopValue(t, `gtfs:stop_id${suffix}`, stop.stop_id);
   const stopNames = (t[`gtfs:stop_name${suffix}`] ?? "").split(";").map((v) => v.trim()).filter((v) => v && v !== t.name);
   if (stopNames.length) t[`gtfs:stop_name${suffix}`] = stopNames.join(";");
