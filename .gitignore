@@ -4,6 +4,12 @@ gtfs*.zip
 *.osm
 *.osm.pbf
 
-# OS / editor
 .DS_Store
 *.swp
+
+node_modules/
+
+npm-debug.log*
+
+.env
+.env.*

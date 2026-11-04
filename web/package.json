@@ -6,8 +6,12 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "start": "node serve.js",
-    "test": "node --test"
+    "deploy": "gh-pages -d ."
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "gh-pages": "^6.3.0"
+  }
 }
