@@ -60,8 +60,8 @@ and GTFS keys, and `test/pipeline.test.js` runs them on generated relations.
   networks are found in their `ref:*:<network>` tags (`ref:FR:Atoumod:Nomad`). IDs of other feeds stay. A platform read as `network=Twisto;Nomad Car` is two networks, and
   a ref under a shorter name (`ref:Nomad` for `Nomad Car`) stays under that name. A second stop of the same network is the one across the
   road: the one on the good side stays, the other is removed.
-- **network-specific metadata**: `gtfs:stop_code:<feed>` is the code of the first network only: the code of another network is not exported
-  (no `gtfs:stop_code:<feed>:Nomad`). References keep their network-specific keys (`ref:Nomad`, `ref:FR:Atoumod:Nomad`).
+- **network-specific metadata**: `gtfs:stop_code:<feed>` is only exported for a code of the first network that no ref holds. On no exported object is there a code of another
+  network or a repeated ref: no `gtfs:stop_code:<feed>:Nomad`, and no `gtfs:stop_code:<feed>` repeating `ref` or `ref:Nomad`. References keep their network-specific keys (`ref:Nomad`, `ref:FR:Atoumod:Nomad`).
 - **shared stops**: `ref` and the tags holding a stop_id belong to the network owning the stop, the first one (`network=Twisto`, `ref=hipp02`).
   The others use their name, never a number: `ref:Nomad=14CAE21B`, `ref:FR:Atoumod:Nomad=…`. Numbered refs found on a stop are renamed.
   A ref is one value for one physical stop: never `a;b`, one per network on a platform, and on one platform only. Two stops face to face on a
