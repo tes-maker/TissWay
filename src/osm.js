@@ -7,6 +7,8 @@
 // Objects created by the tool have a negative id ("n-12") and no version.
 
 import { overpass } from "./net.js";
+import { CODE_IN_ID } from "./platforms.js";
+import { settings } from "./settings.js";
 
 const MEMBER_TYPES = { n: "node", w: "way", r: "relation" };
 const KIND = { node: "n", way: "w", relation: "r" };
@@ -117,6 +119,22 @@ const unescapeXml = (s) => s.replace(/&(#x?[0-9a-fA-F]+|amp|lt|gt|quot|apos);/g,
 const tagValues = (...values) => [...new Set(values.flatMap((v) => (v || "").split(";").map((x) => x.trim()).filter(Boolean)))];
 const networkSuffix = (network) => network.trim().replace(/\s+/g, "_").replace(/[^\p{L}\p{N}_.-]/gu, "");
 
+/** Stop ids exported for a platform: for each feed the stop of the first network, the one holding ref without suffix. A value known as the ref of another network
+ * is left out, unless nothing else remains. Without any ref to tell, the last id of the feed. */
+function exportedStopIds(t, networks) {
+  const bases = ["ref", ...settings.stop_ref_tags.filter((k) => !k.startsWith("gtfs:"))];
+  const first = new Set(tagValues(...bases.map((k) => t[k])));
+  const others = new Set(tagValues(...bases.flatMap((base) => networks.slice(1).map((n) => t[`${base}:${networkSuffix(n)}`]))));
+  const holds = (values, id) => values.has(id) || values.has(CODE_IN_ID.exec(id)?.[1]);
+  const isFirst = (id) => holds(first, id);
+  const isOther = (id) => !isFirst(id) && holds(others, id);
+  const feedKeys = Object.keys(t).filter((k) => /^gtfs:stop_id:(?!\d+$).+/.test(k));
+  const ofFeed = (ids) => ids.filter(isFirst).at(-1) ?? ids.filter((id) => !isOther(id)).at(-1) ?? ids.at(-1);
+  const ids = tagValues(t["gtfs:stop_id"], ...feedKeys.map((k) => ofFeed(tagValues(t[k]))));
+  const kept = ids.filter((id) => !isOther(id));
+  return kept.length ? kept : ids;
+}
+
 /** Compact network and GTFS stop ids on exported platforms, without changing the in-memory tags used during processing. */
 function outputPlatformTags(tags) {
   const out = { ...tags };
@@ -138,9 +156,13 @@ function outputPlatformTags(tags) {
   }
 
   const feedStopIds = Object.keys(out).filter((k) => /^gtfs:stop_id:(?!\d+$).+/.test(k));
-  const stopIds = tagValues(out["gtfs:stop_id"], ...feedStopIds.map((k) => (out[k] || "").split(";").map((v) => v.trim()).filter(Boolean).at(-1)));
+  const stopIds = exportedStopIds(out, networks);
   if (stopIds.length) out["gtfs:stop_id"] = stopIds.join(";");
   for (const k of feedStopIds) delete out[k];
+
+  // The stop code of a network that does not own the platform is not exported, it only serves while the priority can still change.
+  const secondaryCode = (k) => /^gtfs:stop_code:[^:]+:./.test(k) || networks.slice(1).some((n) => k === `gtfs:stop_code:${networkSuffix(n)}`);
+  for (const k of Object.keys(out).filter(secondaryCode)) delete out[k];
   return out;
 }
 
