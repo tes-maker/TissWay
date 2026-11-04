@@ -1,0 +1,17 @@
+{
+  "name": "tissway-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GTFS to OpenStreetMap public transport relations (PTv2), in the browser.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "deploy": "gh-pages -d ."
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "gh-pages": "^6.3.0"
+  }
+}

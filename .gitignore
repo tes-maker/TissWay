@@ -1,0 +1,9 @@
+# Files downloaded or generated when working on tissway
+gtfs*.zip
+*-gtfs.zip
+*.osm
+*.osm.pbf
+
+# OS / editor
+.DS_Store
+*.swp
