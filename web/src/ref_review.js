@@ -11,7 +11,7 @@
 // The review keeps the ref tags detected by the run: changing a setting afterwards resets what a run detected.
 
 import { dist } from "./geo.js";
-import { CODE_IN_ID, NETWORK_KEYS, refKeyFor, sizeOf } from "./platforms.js";
+import { CODE_IN_ID, NETWORK_KEYS, nameNumberedNetworkTags, refKeyFor, sizeOf } from "./platforms.js";
 import { settings } from "./settings.js";
 import { log } from "./util.js";
 
@@ -102,6 +102,7 @@ function placeValues(review, key) {
 
 /** network becomes the owner of the platform: its refs and network tags take the first place, the old owner's go to ref:<old owner> and its number. */
 function promote(t, network, bases) {
+  nameNumberedNetworkTags(t);
   const old = t.network;
   const number = Object.keys(t).find((k) => /^network:\d+$/.test(k) && t[k] === network);
   if (!old || !number) return false;
@@ -112,14 +113,17 @@ function promote(t, network, bases) {
     if (mine !== undefined) t[refKeyFor(base, old)] = mine;
     if (theirs !== undefined) t[base] = theirs;
   }
-  const suffix = number.slice("network".length);
-  for (const key of NETWORK_KEYS) {
-    const [a, b] = [t[key], t[key + suffix]];
+  for (const key of NETWORK_KEYS.slice(1)) {
+    const other = refKeyFor(key, network);
+    const [a, b] = [t[key], t[other]];
     delete t[key];
-    delete t[key + suffix];
+    delete t[other];
     if (b !== undefined) t[key] = b;
-    if (a !== undefined) t[key + suffix] = a;
+    if (a !== undefined) t[refKeyFor(key, old)] = a;
   }
+  const suffix = number.slice("network".length);
+  t.network = network;
+  t[`network${suffix}`] = old;
   return true;
 }
 
@@ -146,7 +150,11 @@ const REF_TAG = /^(?:ref(?::|$)|gtfs:stop_(?:id|code)(?::|$))/;
 /** Why this value is obsolete, "" if nothing says so. */
 function obsoleteBecause(review, tag, value, network, nets) {
   if (!review.inFeed.size) return "";
-  if (tag.startsWith("gtfs:")) return review.feed && tag.endsWith(`:${review.feed}`) && !review.inFeed.has(value) ? "not in this GTFS" : "";
+  if (tag.startsWith("gtfs:")) {
+    const inCurrentFeed = review.feed && (tag === `gtfs:stop_code:${review.feed}` || tag.startsWith(`gtfs:stop_code:${review.feed}:`)
+      || tag === `gtfs:stop_id:${review.feed}` || tag.startsWith(`gtfs:stop_id:${review.feed}:`));
+    return inCurrentFeed && !review.inFeed.has(value) ? "not in this GTFS" : "";
+  }
   if (network && !nets.includes(network)) return `${network} is no longer on this stop`;
   const inFeed = network && [...review.feedNetworks].some((n) => n === network || n.startsWith(`${network} `));
   return inFeed && !review.inFeed.has(value) ? `not in the GTFS of ${network}` : "";
@@ -207,12 +215,15 @@ export function applyPriority(review, order) {
  * owner when both sizes are known, like during the run (see takesOver).
  * sizes, ofStop: see stopNetworks. stops: the GTFS stops. feed: suffix of the gtfs:* tags. */
 export function reviewRefs(obj, { sizes = null, ofStop = new Map(), stops = [], feed = "" } = {}) {
-  const review = { obj, feed, removed: [], inFeed: feedValues(stops), feedNetworks: new Set([...ofStop.values()].flatMap((names) => [...names])), known: valuesOfStops(stops, ofStop), bases: ["ref", ...settings.stop_ref_tags], reach_m: settings.thresholds.holder_m,
+  const stopCode = feed ? `gtfs:stop_code:${feed}` : "gtfs:stop_code";
+  const review = { obj, feed, removed: [], inFeed: feedValues(stops), feedNetworks: new Set([...ofStop.values()].flatMap((names) => [...names])), known: valuesOfStops(stops, ofStop), bases: ["ref", ...settings.stop_ref_tags, stopCode], reach_m: settings.thresholds.holder_m,
     corrected: [], toCheck: [], order: [] };
   const keys = platformKeys(obj);
   const networks = new Set(), held = new Map();
   for (const key of keys) {
-    const nets = networksOf(obj.get(key).tags);
+    const tags = obj.get(key).tags;
+    nameNumberedNetworkTags(tags);
+    const nets = networksOf(tags);
     if (nets.length > 1) {
       nets.forEach((n) => networks.add(n));
       held.set(nets[0], (held.get(nets[0]) ?? 0) + 1);

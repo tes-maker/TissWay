@@ -12,7 +12,7 @@ import { Store, completeWayNodes, platformsIn, writeOsm } from "./osm.js";
 import { stopNetworks } from "./pipeline.js";
 import { reviewRefs } from "./ref_review.js";
 import { settings } from "./settings.js";
-import { addStopValue, nameNumberedRefs } from "./platforms.js";
+import { addStopValue, nameNumberedNetworkTags, nameNumberedRefs, networkKeyFor } from "./platforms.js";
 import { osmPlatforms } from "./stops.js";
 import { log, sameTags, sortedBy } from "./util.js";
 
@@ -49,12 +49,16 @@ export function nearestPairs(stops, platforms, max_m) {
 }
 
 /** Platform tags completed with the GTFS stop. */
-export function feedTags(tags, stop, feedId) {
+export function feedTags(tags, stop, feedId, network = tags.network) {
   const t = { ...tags }, suffix = feedId ? `:${feedId}` : "";
   nameNumberedRefs(t, stop.stop_id);
+  nameNumberedNetworkTags(t);
   addStopValue(t, `gtfs:stop_id${suffix}`, stop.stop_id);
   addStopValue(t, `gtfs:stop_name${suffix}`, stop.stop_name);
-  if (stop.stop_code) addStopValue(t, `gtfs:stop_code${suffix}`, stop.stop_code);
+  if (stop.stop_code) {
+    const key = `gtfs:stop_code${suffix}`;
+    addStopValue(t, t.network && network !== t.network ? networkKeyFor(key, network) : key, stop.stop_code);
+  }
   const refs = new Set([...(t.route_ref || "").split(";").filter(Boolean), ...stop.route_ref]);
   if (refs.size) t.route_ref = sortedBy(refs, refSortKey).join(";");
   t.bus ??= "yes";
@@ -78,7 +82,7 @@ export async function runPlatforms(feed, { network, feedId = null, max_m = 30, o
   for (const stop of stops) {
     if (!matches.has(stop.stop_id)) continue;
     const id = matches.get(stop.stop_id)[0];
-    const tags = feedTags(osm[id].tags, stop, suffix);
+    const tags = feedTags(osm[id].tags, stop, suffix, network);
     if (!sameTags(tags, osm[id].tags)) obj.set(id, { ...osm[id], tags });
   }
   await completeWayNodes(obj);

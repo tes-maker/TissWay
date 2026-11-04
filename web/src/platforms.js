@@ -495,6 +495,24 @@ const isRefKey = (key) => /^(?:ref|local_ref)$/.test(key) || settings.stop_ref_t
 
 /** Key of a ref for a network that does not own the stop: "ref:Nomad", "ref:FR:Atoumod:Nomad". */
 export const refKeyFor = (base, network) => `${base}:${network.trim().replace(/\s+/g, "_").replace(/[^\p{L}\p{N}_.-]/gu, "")}`;
+export const networkKeyFor = (base, network) => refKeyFor(base, network);
+
+/** Network-specific metadata and stop codes use the network name, not the number of its network tag. */
+export function nameNumberedNetworkTags(t) {
+  const numbered = Object.keys(t).filter((k) => /^network:\d+$/.test(k)).sort((a, b) => Number(a.slice(8)) - Number(b.slice(8)));
+  const names = new Map(numbered.map((k) => [k.slice("network:".length), t[k]]));
+  for (const key of Object.keys(t)) {
+    const wiki = /^(network:wikidata|network:wikipedia):(\d+)$/.exec(key);
+    const code = /^(gtfs:stop_code(?::[A-Z][A-Z][a-zA-Z0-9_.-]+)?):(\d+)$/.exec(key);
+    const match = wiki || code;
+    if (!match) continue;
+    const network = names.get(match[2]);
+    if (!network) continue;
+    const target = networkKeyFor(match[1], network);
+    if (!(target in t)) t[target] = t[key];
+    delete t[key];
+  }
+}
 
 const STOP_KEY = /^gtfs:stop_(?:id|name|code)(?::|$)/;
 
@@ -567,34 +585,55 @@ export function sizeOf(sizes, network) {
 
 /** The network tags and the refs of the stop go to the network at number suffix (":2"), which becomes its owner. */
 function changeOwner(t, suffix, old) {
-  for (const key of Object.keys(t)) {
-    if (!isRefKey(key)) continue;
-    t[refKeyFor(key, old)] = t[key];
+  const incoming = t[`network${suffix}`];
+  for (const key of new Set(["ref", "local_ref", ...settings.stop_ref_tags])) {
+    const other = refKeyFor(key, incoming);
+    const [a, b] = [t[key], t[other]];
     delete t[key];
-  }
-  for (const key of NETWORK_KEYS) {
-    const [a, b] = [t[key], t[key + suffix]];
-    delete t[key];
-    delete t[key + suffix];
+    delete t[other];
     if (b !== undefined) t[key] = b;
-    if (a !== undefined) t[key + suffix] = a;
+    if (a !== undefined) t[refKeyFor(key, old)] = a;
   }
+  for (const key of NETWORK_KEYS.slice(1)) {
+    const other = networkKeyFor(key, incoming);
+    const [a, b] = [t[key], t[other]];
+    delete t[key];
+    delete t[other];
+    if (b !== undefined) t[key] = b;
+    if (a !== undefined) t[networkKeyFor(key, old)] = a;
+  }
+  const codes = Object.keys(t).filter((k) => /^gtfs:stop_code(?::[A-Z][A-Z][a-zA-Z0-9_.-]+)?$/.test(k));
+  for (const key of codes) {
+    const other = networkKeyFor(key, incoming);
+    const [a, b] = [t[key], t[other]];
+    delete t[key];
+    delete t[other];
+    if (b !== undefined) t[key] = b;
+    if (a !== undefined) t[networkKeyFor(key, old)] = a;
+  }
+  const [a, b] = [t.network, t[`network${suffix}`]];
+  if (b !== undefined) t.network = b;
+  if (a !== undefined) t[`network${suffix}`] = a;
 }
 
 /** Complete an existing OSM platform with the GTFS / network tags without overwriting another network's, except name, replaced by the
- * official GTFS name, and the physical tags, only added when missing. The network* tags of one network all get the same number. ref and
+ * official GTFS name, and the physical tags, only added when missing. The network name is numbered; its metadata and stop code use its name. ref and
  * the tags holding a stop_id belong to the network owning the stop (network=*): the others use ref:<network>, never a number. A physical stop is
  * one platform for all its networks, each with its own ids: gtfs:stop_id:<feed> lists those of the networks, separated by ";".
  * sizes: see takesOver. */
 export function enrich(obj, key, tags, sizes = null, ofStop = new Map()) {
   const t = obj.edit(key).tags;
   nameNumberedRefs(t, key);
+  nameNumberedNetworkTags(t);
   tidyStopKeys(t, ofStop);
   let suffix = "", n = 1;
   while ((t[`network${suffix}`] ?? tags.network) !== tags.network) suffix = `:${++n}`;
   const incoming = tags.network;
   const current = t.network;
-  for (const [k, v] of Object.entries(tags)) if (k.startsWith("network")) t[k + suffix] = v;
+  for (const [k, v] of Object.entries(tags)) {
+    if (k === "network") t[k + suffix] = v;
+    else if (k.startsWith("network:")) t[suffix ? networkKeyFor(k, incoming) : k] = v;
+  }
   if (suffix && takesOver(incoming, current, sizes)) {
     changeOwner(t, suffix, current);
     suffix = "";
@@ -605,7 +644,10 @@ export function enrich(obj, key, tags, sizes = null, ofStop = new Map()) {
     else if (k.startsWith("network")) continue;
     else if (PHYSICAL_TAGS.has(k)) t[k] ??= v;
     else if (isRefKey(k)) t[suffix ? refKeyFor(k, incoming) : k] = v; // the GTFS gives the ref of this network: one value
-    else if (STOP_KEY.test(k)) addStopValue(t, k, v);
+    else if (STOP_KEY.test(k)) {
+      const target = k.startsWith("gtfs:stop_code") && t.network && incoming !== t.network ? networkKeyFor(k, incoming) : k;
+      addStopValue(t, target, v);
+    }
     else addTag(t, k, v);
   }
 }

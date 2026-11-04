@@ -369,7 +369,7 @@ test("enrich numbers other networks and keeps survey tags", () => {
   const obj = new Store({ nP: node(49, 1, { network: "Twisto", ref: "X1", wheelchair: "no", highway: "platform" }) });
   enrich(obj, "nP", { network: "Nomad", "network:wikidata": "Q1", ref: "Y2", wheelchair: "yes", highway: "bus_stop", name: "Gare" });
   const t = obj.get("nP").tags;
-  assert.deepEqual([t.network, t["network:2"], t["network:wikidata:2"]], ["Twisto", "Nomad", "Q1"]);
+  assert.deepEqual([t.network, t["network:2"], t["network:wikidata:Nomad"]], ["Twisto", "Nomad", "Q1"]);
   assert.deepEqual([t.ref, t["ref:Nomad"], t["ref:2"]], ["X1", "Y2", undefined]);
   assert.ok(t.wheelchair === "no" && t.highway === "platform" && !("wheelchair:2" in t));
   assert.equal(t.name, "Gare");
@@ -406,11 +406,12 @@ test("a stop has one ref per network: the second one, across the road, is droppe
 test("the local network takes over a stop from the regional one", () => {
   settings.stop_ref_tags = ["ref:FR:Atoumod"];
   const sizes = new Map([["Twisto", 900], ["Nomad Car", 7000]]); // the feed's name of the Nomad of OSM
-  const obj = new Store({ n1: node(49, 1, { network: "Nomad", "network:wikidata": "Q9", ref: "14CAE21B", "ref:FR:Atoumod": "N" }) });
-  enrich(obj, "n1", { network: "Twisto", "network:wikidata": "Q3", ref: "hipp02", "ref:FR:Atoumod": "T" }, sizes);
+  const obj = new Store({ n1: node(49, 1, { network: "Nomad", "network:wikidata": "Q9", ref: "14CAE21B", "ref:FR:Atoumod": "N", "gtfs:stop_code:FR-X": "14CAE21B" }) });
+  enrich(obj, "n1", { network: "Twisto", "network:wikidata": "Q3", ref: "hipp02", "ref:FR:Atoumod": "T", "gtfs:stop_code:FR-X": "hipp02" }, sizes);
   const t = obj.get("n1").tags;
-  assert.deepEqual([t.network, t["network:wikidata"], t["network:2"], t["network:wikidata:2"]], ["Twisto", "Q3", "Nomad", "Q9"]);
+  assert.deepEqual([t.network, t["network:wikidata"], t["network:2"], t["network:wikidata:Nomad"]], ["Twisto", "Q3", "Nomad", "Q9"]);
   assert.deepEqual([t.ref, t["ref:Nomad"], t["ref:FR:Atoumod"], t["ref:FR:Atoumod:Nomad"]], ["hipp02", "14CAE21B", "T", "N"]);
+  assert.deepEqual([t["gtfs:stop_code:FR-X"], t["gtfs:stop_code:FR-X:Nomad"]], ["hipp02", "14CAE21B"]);
   // the regional one coming back changes nothing
   enrich(obj, "n1", { network: "Nomad", "network:wikidata": "Q9", ref: "14CAE21B", "ref:FR:Atoumod": "N" }, sizes);
   assert.deepEqual([obj.get("n1").tags.ref, obj.get("n1").tags["ref:Nomad"], obj.get("n1").tags.network], ["hipp02", "14CAE21B", "Twisto"]);

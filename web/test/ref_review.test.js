@@ -42,7 +42,9 @@ test("Mont Coco: the ids of a list go each to their network, with what was cut f
 test("well placed refs are left alone", () => {
   const tags = { ...SHARED, ref: "chuo02", "ref:Nomad": "14CAE74A", "ref:FR:Atoumod": TWISTO_ID, "ref:FR:Atoumod:Nomad": NOMAD_ID };
   const [review, t] = reviewed(tags);
-  assert.deepEqual(t, tags);
+  const expected = { ...tags, "network:wikidata:Nomad": "Q98131290" };
+  delete expected["network:wikidata:2"];
+  assert.deepEqual(t, expected);
   assert.deepEqual([review.corrected, review.toCheck], [[], []]);
   assert.deepEqual(review.order, ["Twisto", "Nomad"]);
 });
@@ -71,12 +73,20 @@ test("the priority moves ref and network, and comes back", () => {
   const tags = { ...SHARED, ref: "chuo02", "ref:Nomad": "14CAE74A", "ref:FR:Atoumod": TWISTO_ID, "ref:FR:Atoumod:Nomad": NOMAD_ID, local_ref: "A" };
   const [review, t] = reviewed(tags);
   assert.equal(applyPriority(review, ["Nomad", "Twisto"]), 1);
-  assert.deepEqual([t.network, t["network:2"], t["network:wikidata"], t["network:wikidata:2"]], ["Nomad", "Twisto", "Q98131290", "Q3537947"]);
+  assert.deepEqual([t.network, t["network:2"], t["network:wikidata"], t["network:wikidata:Twisto"]], ["Nomad", "Twisto", "Q98131290", "Q3537947"]);
   assert.deepEqual([t.ref, t["ref:Twisto"], t["ref:Nomad"]], ["14CAE74A", "chuo02", undefined]);
   assert.deepEqual([t["ref:FR:Atoumod"], t["ref:FR:Atoumod:Twisto"]], [NOMAD_ID, TWISTO_ID]);
   assert.equal(t["local_ref:Twisto"], "A");
   assert.equal(applyPriority(review, ["Twisto", "Nomad"]), 1);
-  assert.deepEqual(t, tags);
+  assert.deepEqual([t.network, t["network:wikidata"], t["network:wikidata:Nomad"], t.ref, t["ref:Nomad"]],
+    ["Twisto", "Q3537947", "Q98131290", "chuo02", "14CAE74A"]);
+});
+
+test("the stop code is kept with the network whose GTFS stop has that code", () => {
+  const feedStops = [{ ...stops[0], stop_code: "fadr01" }, stops[1]];
+  const obj = store({ ...SHARED, "gtfs:stop_code:FR-X": "fadr01;14CAE74A" });
+  reviewRefs(obj, { sizes, ofStop, stops: feedStops, feed: "FR-X" });
+  assert.deepEqual([obj.get("n1").tags["gtfs:stop_code:FR-X"], obj.get("n1").tags["gtfs:stop_code:FR-X:Nomad"]], ["fadr01", "14CAE74A"]);
 });
 
 test("the first in priority takes the platform: fewest stops without a list, the list otherwise", () => {
