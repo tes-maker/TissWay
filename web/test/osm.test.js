@@ -36,7 +36,7 @@ test("writeOsm: modified objects, the nodes of their ways, escaped tags, parsed 
   assert.equal(root.children[0].attrs.version, undefined); // new object
 });
 
-test("writeOsm compacts shared platform network tags and replaces old feed stop ids", () => {
+test("writeOsm compacts shared platform network tags, keeps the stop id of the first network and no secondary stop code", () => {
   const tags = {
     alt_name: "Péricentre", bench: "yes", bin: "yes", bus: "yes", departures_board: "timetable",
     "gtfs:stop_code:FR-NOR-Atoumod:Nomad": "14CAE27A",
@@ -58,7 +58,7 @@ test("writeOsm compacts shared platform network tags and replaces old feed stop 
 
   assert.deepEqual(output, {
     alt_name: "Péricentre", bench: "yes", bin: "yes", bus: "yes", departures_board: "timetable",
-    "gtfs:stop_code:FR-NOR-Atoumod:Nomad": "14CAE27A", "gtfs:stop_id": "FR:14118:ZE:1151885:ATOUMOD040",
+    "gtfs:stop_id": "FR:14118:ZE:peric01:ATOUMOD029",
     highway: "bus_stop", lit: "yes", name: "Péricentre", network: "Twisto;Nomad",
     "network:wikidata": "Q3537947;Q98131290",
     "network:wikipedia": "fr:Transports en commun de Caen;fr:Nomad (réseau)",
@@ -68,6 +68,36 @@ test("writeOsm compacts shared platform network tags and replaces old feed stop 
     shelter: "no", tactile_paving: "no", wheelchair: "no",
   });
   assert.deepEqual(obj.get("n1").tags, originalTags);
+});
+
+test("writeOsm: gtfs:stop_id follows the network holding ref", () => {
+  const TWISTO = "FR:14118:ZE:chuo02:ATOUMOD029", NOMAD = "FR:14118:ZE:1151885:ATOUMOD040", OTHER = "FR:14118:ZE:1151999:ATOUMOD040";
+  const exported = (tags) => {
+    const obj = new Store({ n1: { version: "1", lat: 49, lon: 1, tags: { public_transport: "platform", ...tags } } });
+    obj.edit("n1");
+    return Object.fromEntries(parseXml(writeOsm(obj)).children[0].children.map((tag) => [tag.attrs.k, tag.attrs.v]));
+  };
+  const shared = { network: "Twisto", "network:2": "Nomad" };
+  const ids = { "gtfs:stop_id:F": `${TWISTO};${NOMAD}` };
+  assert.equal(exported({ ...shared, ...ids, ref: "chuo02", "ref:Nomad": "14CAE74A" })["gtfs:stop_id"], TWISTO);
+  assert.equal(exported({ ...shared, "gtfs:stop_id:F": `${NOMAD};${TWISTO}`, ref: "chuo02" })["gtfs:stop_id"], TWISTO); // whatever the order
+  // Nomad first: its id has no code of its ref, the ref of the other network tells
+  assert.equal(exported({ network: "Nomad", "network:2": "Twisto", ...ids, ref: "14CAE74A", "ref:Twisto": "chuo02" })["gtfs:stop_id"], NOMAD);
+  // the id of the second network already in OSM goes too, not an id of another feed
+  assert.equal(exported({ ...shared, "gtfs:stop_id": NOMAD, "gtfs:stop_id:F": TWISTO, ref: "chuo02", "ref:Nomad": "1151885" })["gtfs:stop_id"], TWISTO);
+  assert.equal(exported({ ...shared, "gtfs:stop_id": "G1", "gtfs:stop_id:F": TWISTO, ref: "chuo02" })["gtfs:stop_id"], `G1;${TWISTO}`);
+  // the only id known stays, even of the second network; no ref to tell: the last one
+  assert.equal(exported({ ...shared, "gtfs:stop_id:F": NOMAD, "ref:Nomad": "1151885" })["gtfs:stop_id"], NOMAD);
+  assert.equal(exported({ ...shared, "gtfs:stop_id:F": `${NOMAD};${OTHER}` })["gtfs:stop_id"], OTHER);
+});
+
+test("writeOsm: only the stop code of the first network", () => {
+  const obj = new Store({ n1: { version: "1", lat: 49, lon: 1, tags: { public_transport: "platform", network: "Twisto", "network:2": "Nomad",
+    "gtfs:stop_code:F": "chuo02", "gtfs:stop_code:F:Nomad": "14CAE74A", "gtfs:stop_code:Nomad": "14CAE74A" } } });
+  obj.edit("n1");
+  const keys = parseXml(writeOsm(obj)).children[0].children.map((tag) => tag.attrs.k).filter((k) => k.startsWith("gtfs:stop_code"));
+  assert.deepEqual(keys, ["gtfs:stop_code:F"]);
+  assert.equal(obj.get("n1").tags["gtfs:stop_code:F:Nomad"], "14CAE74A"); // kept for a change of priority
 });
 
 test("nearestPairs: one to one, nearest first", () => {

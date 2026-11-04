@@ -56,10 +56,11 @@ and GTFS keys, and `test/pipeline.test.js` runs them on generated relations.
 - **platform**: `public_transport=platform`, `highway=bus_stop` (`highway=platform` on a way, `bus_stop` being for nodes only), `bus=yes`.
   An existing `route_ref` gets the line, none is created from a partial selection.
 - **one physical stop, several networks**: exported platforms combine `network` and its Wikidata/Wikipedia values in network order, separated by `;`.
-  `gtfs:stop_id` contains the latest ID from each feed; an older ID from that feed is replaced. A second stop of the same network is the one across the
+  `gtfs:stop_id` contains one ID per feed, that of the stop of the first network (the one holding `ref` without suffix), the IDs of the other networks
+  staying in their `ref:*:<network>` tags (`ref:FR:Atoumod:Nomad`). A second stop of the same network is the one across the
   road: the one on the good side stays, the other is removed.
-- **network-specific metadata**: `gtfs:stop_code:<feed>` uses the network name for a secondary value (`gtfs:stop_code:<feed>:Nomad`), not a
-  numbered suffix. References keep their network-specific keys (`ref:Nomad`, `ref:FR:Atoumod:Nomad`).
+- **network-specific metadata**: `gtfs:stop_code:<feed>` is the code of the first network only: the code of another network is not exported
+  (no `gtfs:stop_code:<feed>:Nomad`). References keep their network-specific keys (`ref:Nomad`, `ref:FR:Atoumod:Nomad`).
 - **shared stops**: `ref` and the tags holding a stop_id belong to the network owning the stop, the first one (`network=Twisto`, `ref=hipp02`).
   The others use their name, never a number: `ref:Nomad=14CAE21B`, `ref:FR:Atoumod:Nomad=…`. Numbered refs found on a stop are renamed.
   A ref is one value for one physical stop: never `a;b`, one per network on a platform, and on one platform only. Two stops face to face on a
