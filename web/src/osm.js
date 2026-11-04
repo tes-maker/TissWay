@@ -9,6 +9,7 @@
 import { overpass } from "./net.js";
 import { CODE_IN_ID } from "./platforms.js";
 import { settings } from "./settings.js";
+import { sameTags } from "./util.js";
 
 const MEMBER_TYPES = { n: "node", w: "way", r: "relation" };
 const KIND = { node: "n", way: "w", relation: "r" };
@@ -119,14 +120,21 @@ const unescapeXml = (s) => s.replace(/&(#x?[0-9a-fA-F]+|amp|lt|gt|quot|apos);/g,
 const tagValues = (...values) => [...new Set(values.flatMap((v) => (v || "").split(";").map((x) => x.trim()).filter(Boolean)))];
 const networkSuffix = (network) => network.trim().replace(/\s+/g, "_").replace(/[^\p{L}\p{N}_.-]/gu, "");
 
+/** The ref tags of a platform, whatever the names of its networks (ref:Nomad can be the ref of Nomad Car): bases are the tags holding a stop id without suffix
+ * (ref:FR:Atoumod when ref:FR:Atoumod:Nomad exists), suffixed the tags of the other networks. */
+function refTags(t) {
+  const refKeys = Object.keys(t).filter((k) => k.startsWith("ref:"));
+  const bases = new Set([...settings.stop_ref_tags.filter((k) => !k.startsWith("gtfs:")), ...refKeys.filter((k) => refKeys.some((o) => o.startsWith(`${k}:`)))]);
+  const suffixed = Object.keys(t).filter((k) => !bases.has(k) && (k.startsWith("ref:") || [...bases].some((base) => k.startsWith(`${base}:`))));
+  return { refKeys, bases, suffixed };
+}
+
 /** Stop ids exported for a platform: the stop of the first network, the one of the tags without suffix (ref=chuo02, ref:FR:Atoumod=FR:14118:ZE:chuo02:...), taken from
  * these tags if needed. The id of another network is left out, its ref:*:<network> holds it (network names do not matter: ref:Nomad can be the ref of Nomad Car), unless
  * nothing else remains. An id that no ref tells about is of another feed, and stays. Without any ref to tell, the last id of a feed. */
 function exportedStopIds(t) {
   const code = (id) => CODE_IN_ID.exec(id)?.[1];
-  const refKeys = Object.keys(t).filter((k) => k.startsWith("ref:"));
-  const bases = new Set([...settings.stop_ref_tags.filter((k) => !k.startsWith("gtfs:")), ...refKeys.filter((k) => refKeys.some((o) => o.startsWith(`${k}:`)))]);
-  const suffixed = Object.keys(t).filter((k) => !bases.has(k) && (k.startsWith("ref:") || [...bases].some((base) => k.startsWith(`${base}:`))));
+  const { refKeys, bases, suffixed } = refTags(t);
   const ownIds = tagValues(...[...bases].map((k) => t[k]), ...refKeys.flatMap((k) => tagValues(t[k]).filter((v) => t.ref && code(v) === t.ref)));
   const first = new Set([...tagValues(t.ref), ...ownIds]);
   const others = new Set(tagValues(...suffixed.map((k) => t[k])));
@@ -164,12 +172,28 @@ function outputPlatformTags(tags) {
   const stopIds = exportedStopIds(out);
   if (stopIds.length) out["gtfs:stop_id"] = stopIds.join(";");
   for (const k of feedStopIds) delete out[k];
-
-  // The stop code of a network that does not own the platform is not exported, it only serves while the priority can still change.
-  const secondaryCode = (k) => /^gtfs:stop_code:[^:]+:./.test(k) || networks.slice(1).some((n) => k === `gtfs:stop_code:${networkSuffix(n)}`);
-  for (const k of Object.keys(out).filter(secondaryCode)) delete out[k];
   return out;
 }
+
+/** Without the stop codes that repeat a ref or belong to a network that does not own the stop. In memory they serve while the priority can still change, a file never
+ * has them, on any object: no gtfs:stop_code:<feed>:<network>, gtfs:stop_code:<network> or numbered key, and no gtfs:stop_code[:<feed>] value that is a ref of the platform. */
+function withoutSecondaryStopCodes(tags) {
+  const out = { ...tags };
+  const networks = tagValues(tags.network, ...Object.keys(tags).filter((k) => /^network:\d+$/.test(k)).map((k) => tags[k])).slice(1).map(networkSuffix);
+  const secondary = (k) => /^gtfs:stop_code:(?:[^:]+:.|\d+$)/.test(k) || networks.some((n) => k === `gtfs:stop_code:${n}`);
+  const codes = Object.keys(out).filter((k) => k.startsWith("gtfs:stop_code"));
+  for (const k of codes.filter(secondary)) delete out[k];
+  const refs = new Set(tagValues(tags.ref, ...refTags(tags).suffixed.map((k) => tags[k])));
+  for (const k of codes.filter((c) => c in out)) {
+    const kept = tagValues(out[k]).filter((v) => !refs.has(v));
+    if (kept.length) out[k] = kept.join(";");
+    else delete out[k];
+  }
+  return out;
+}
+
+/** The tags of an object in a file. */
+const outputTags = (tags) => withoutSecondaryStopCodes(tags.public_transport === "platform" ? outputPlatformTags(tags) : tags);
 
 /** Modified objects (and the nodes of their ways) as a JOSM .osm file. */
 export function writeOsm(obj) {
@@ -181,16 +205,16 @@ export function writeOsm(obj) {
   const lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<osm version="0.6" generator="tissway" upload="true">'];
   for (const key of sorted) {
     const o = obj.get(key);
+    const tags = outputTags(o.tags);
     let attrs = `id="${key.slice(1)}"`;
     if (o.version) attrs += ` version="${o.version}"`;
-    if (obj.modified.has(key)) attrs += ' action="modify"';
+    if (obj.modified.has(key) || !sameTags(tags, o.tags)) attrs += ' action="modify"'; // a node of a way whose tags change here has to be uploaded too
     if (key[0] === "n") attrs += ` lat="${o.lat.toFixed(7)}" lon="${o.lon.toFixed(7)}"`;
     const body = [];
     for (const n of o.nodes || []) body.push(`    <nd ref="${n.slice(1)}" />`);
     for (const [ref, role] of o.members || []) {
       body.push(`    <member type="${MEMBER_TYPES[ref[0]]}" ref="${ref.slice(1)}" role="${escapeXml(role)}" />`);
     }
-    const tags = o.tags.public_transport === "platform" ? outputPlatformTags(o.tags) : o.tags;
     for (const [k, v] of Object.entries(tags)) body.push(`    <tag k="${escapeXml(k)}" v="${escapeXml(v)}" />`);
     const tag = MEMBER_TYPES[key[0]];
     lines.push(...(body.length ? [`  <${tag} ${attrs}>`, ...body, `  </${tag}>`] : [`  <${tag} ${attrs} />`]));

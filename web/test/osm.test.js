@@ -111,13 +111,46 @@ test("Mont Coco: the id of the stop holding ref, whichever networks were run, th
     obj.edit("n1");
     for (const tags of runs) enrich(obj, "n1", tags, null, ofStop);
     reviewRefs(obj, { ofStop, stops, feed: FEED });
-    const out = Object.fromEntries(parseXml(writeOsm(obj)).children[0].children.map((tag) => [tag.attrs.k, tag.attrs.v]));
-    delete out[`gtfs:stop_code:${FEED}`]; // the code of the first network, when a run gives it
-    return out;
+    return Object.fromEntries(parseXml(writeOsm(obj)).children[0].children.map((tag) => [tag.attrs.k, tag.attrs.v]));
   };
   for (const runs of [[], [twisto], [nomad], [twisto, nomad], [nomad, twisto]]) assert.deepEqual(exported(runs), expected);
   assert.deepEqual(exported([twisto]), exported([twisto, nomad]));
   [settings.feed, settings.stop_ref_tags, settings.stop_owners] = saved;
+});
+
+test("no export has the stop code of a secondary network, on any object", () => {
+  const F = "FR-NOR-Atoumod", KEY = `gtfs:stop_code:${F}`;
+  const out = (tags, { way = false, modified = true } = {}) => {
+    const obj = new Store({ n1: { version: "1", lat: 49, lon: 1, tags }, w1: { version: "1", tags: { highway: "residential" }, nodes: ["n1"] } });
+    obj.edit(way ? "w1" : "n1");
+    if (!modified) assert.ok(!obj.modified.has("n1"));
+    const node = parseXml(writeOsm(obj)).children.find((e) => e.attrs.id === "1");
+    return [Object.fromEntries(node.children.map((c) => [c.attrs.k, c.attrs.v])), node.attrs.action];
+  };
+  const shared = { network: "Twisto", "network:2": "Nomad Car", ref: "asn01", "ref:Nomad_Car": "14ASN06A" };
+  const noCode = (tags, options) => {
+    const t = out(tags, options)[0];
+    assert.deepEqual(Object.keys(t).filter((k) => k.startsWith("gtfs:stop_code")), [], JSON.stringify(tags));
+    return t;
+  };
+  for (const kinds of [{ public_transport: "platform" }, { highway: "bus_stop" }, { public_transport: "stop_position", highway: "bus_stop" }, {}]) {
+    noCode({ ...kinds, ...shared, [`${KEY}:Nomad`]: "14ASN06A" });
+    noCode({ ...kinds, ...shared, [`${KEY}:Nomad_Car`]: "14ASN06A", [`${KEY}:2`]: "x", "gtfs:stop_code:2": "y" });
+    noCode({ ...kinds, ...shared, "gtfs:stop_code:Nomad_Car": "14ASN06A" });
+    noCode({ ...kinds, ...shared, [KEY]: "14ASN06A" }); // the duplicate of ref:Nomad_Car
+    noCode({ ...kinds, network: "Twisto;Nomad Car", ref: "asn01", "ref:Nomad_Car": "14ASN06A", [KEY]: "14ASN06A", [`${KEY}:Nomad`]: "14ASN06A" });
+  }
+  noCode({ public_transport: "platform", network: "Twisto", "network:2": "Nomad Car", ref: "asn01", "ref:Nomad": "14ASN06A", [KEY]: "14ASN06A" }); // another name of the network
+  noCode({ ...shared, public_transport: "platform", [KEY]: "asn01" }); // the duplicate of ref
+  noCode({ ...shared, public_transport: "platform", [KEY]: "asn01;14ASN06A" });
+  noCode({ public_transport: "platform", network: "Nomad Car", ref: "14ASN06A", [KEY]: "14ASN06A" }); // a single network
+  assert.equal(out({ ...shared, public_transport: "platform", [KEY]: "other;14ASN06A;asn01" })[0][KEY], "other"); // the list loses the refs only
+  assert.equal(out({ ...shared, public_transport: "platform", [KEY]: "other" })[0][KEY], "other"); // no ref holds it
+
+  // a node of a modified way, not modified itself: the tag goes, and the node is uploaded for that; otherwise it is left alone
+  const [t, action] = out({ highway: "bus_stop", [`${KEY}:Nomad`]: "14ASN06A" }, { way: true, modified: false });
+  assert.deepEqual([t[`${KEY}:Nomad`], action], [undefined, "modify"]);
+  assert.equal(out({ highway: "crossing" }, { way: true, modified: false })[1], undefined);
 });
 
 test("writeOsm: only the stop code of the first network", () => {

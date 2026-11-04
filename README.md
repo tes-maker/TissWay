@@ -144,7 +144,7 @@ They follow the OSM wiki's [Public transport](https://wiki.openstreetmap.org/wik
   `gtfs:shape_id` (when matched from the shape). Every `gtfs:*` key carries the `:<feed>` suffix when a feed code is known.
 - **route_master**: `type=route_master`, `route_master=<mode>`, `ref`, `name`, network, colours, `gtfs:route_id`.
 - **platform**: `public_transport=platform`, `highway=bus_stop` on a node (`highway=platform` on a way), `bus=yes` (or `trolleybus=yes`),
-  `name`, network, `gtfs:stop_id`, `gtfs:stop_name`, `gtfs:stop_code`, `ref` (stop_code, or the code of a NeTEx-style stop_id when OSM
+  `name`, network, `gtfs:stop_id`, `gtfs:stop_name`, `gtfs:stop_code` (only when no ref holds that code), `ref` (stop_code, or the code of a NeTEx-style stop_id when OSM
   platforms already follow this), `local_ref` (platform_code), `wheelchair`. An existing `route_ref` gets the line.
 - **stop_position**: `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`), `name`, `direction=forward|backward` on a two-way
   way (not at its ends; removed if served both ways). An existing stop_position keeps its tags: only the missing ones are added, except
