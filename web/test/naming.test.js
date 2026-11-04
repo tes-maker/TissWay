@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import "./helpers.js";
 import * as naming from "../src/naming.js";
-import { settings } from "../src/settings.js";
+import { configure, settings } from "../src/settings.js";
 
 for (const [town, name, label] of [
   ["Louviers", "Châtel", "LOUVIERS Châtel"],
@@ -88,6 +88,16 @@ for (const [places, name, renamed] of [
     assert.equal(naming.townedName(places, once), renamed); // run again on its result: no change
   });
 }
+
+test("the start of the names follows the settings, empty being the default", () => {
+  configure({ "prefixes.coach": "Car Nomad", "prefixes.bus": "" });
+  assert.equal(naming.routeName("coach", "12", "A → B"), "Car Nomad 12: A → B");
+  assert.equal(naming.routeName("coach", "", "A → B"), "Car Nomad: A → B");
+  assert.equal(naming.routeName("bus", "12", "A → B"), "Bus 12: A → B");
+  assert.equal(naming.routeName("trolleybus", "12", "A → B"), "Trolleybus 12: A → B");
+  configure();
+  assert.equal(naming.routeName("coach", "12", "A → B"), "Coach 12: A → B");
+});
 
 test("route names", () => {
   assert.equal(naming.routeName("bus", "12", naming.tripLabel("A", "B")), "Bus 12: A → B");

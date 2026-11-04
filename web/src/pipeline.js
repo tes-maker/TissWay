@@ -23,7 +23,8 @@ import { accentsFrom, agencyNetworks, cleanStopName, fixAccents, nameKey, routeL
 import { services, valhallaReady } from "./net.js";
 import { Store, completeWayNodes, platformsIn, readWays, routesIn, writeOsm } from "./osm.js";
 import { filterRoadPlatforms, tagPlatforms } from "./platforms.js";
-import { settings } from "./settings.js";
+import { reviewRefs } from "./ref_review.js";
+import { activeFeed, settings } from "./settings.js";
 import { splitWays } from "./splitting.js";
 import { matchStops } from "./stops.js";
 import { dedupe, listIn, log, sortedBy } from "./util.js";
@@ -188,7 +189,7 @@ async function resolveNetworks(networks, agencies, routes, relations, wikis, cou
 
 /** {sizes: network -> number of stops in the feed, to tell a local network from a regional one on a shared stop (see platforms.enrich);
  * ofStop: stop_id -> networks calling at it, to tell the stop of another network from the one across the road}. */
-async function stopNetworks(feed, networks) {
+export async function stopNetworks(feed, networks) {
   const sizes = new Map(), ofStop = new Map();
   for (const [stopId, agencies] of await feed.stopAgencies()) {
     const names = new Set([...agencies].map((a) => networks[a]?.network).filter(Boolean));
@@ -340,14 +341,16 @@ export async function runRoutes(feed, { network = null, ref = null, onProgress =
     const tags = networks[route.agency_id] || { network: route.agency_id || "GTFS" };
     buildLine(route, routeVariants, obj, stops, tags, assignments, created, existing);
   }
-  for (const x of tagPlatforms(obj, stops, assignments, await stopNetworks(feed, networks))) log.warn(`stop_id already on another OSM platform, not set (to check): ${x}`);
+  const owners = await stopNetworks(feed, networks);
+  for (const x of tagPlatforms(obj, stops, assignments, owners)) log.warn(`stop_id already on another OSM platform, not set (to check): ${x}`);
   onProgress("Splitting ways…"); // after the relations: ways are also cut at the stop_positions of the termini
   const [nWays, nClosed, nRels] = await splitWays(obj);
   log.info(`${nWays} way(s) split, of which ${nClosed} roundabout(s) / closed way(s); ${nRels} existing OSM relation(s) updated`);
   const n = completeWikis(obj, networks);
   if (n) log.info(`network:wikidata / network:wikipedia completed on ${n} relation(s) / platform(s)`);
   await completeWayNodes(obj);
+  const review = reviewRefs(obj, { ...owners, stops: await feed.stops(), feed: activeFeed() });
 
   const summary = { lines: lines.length, variants: variants.length, stops: used.length, "kept traces": variants.filter((v) => v.kept_from).length };
-  return { xml: writeOsm(obj), filename: outputName(network, routes), detected, summary, state: { routes, trips, stops, lines, obj, networks, assignments } };
+  return { xml: writeOsm(obj), review, filename: outputName(network, routes), detected, summary, state: { routes, trips, stops, lines, obj, networks, assignments } };
 }

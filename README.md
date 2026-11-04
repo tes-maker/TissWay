@@ -122,8 +122,12 @@ With the "Split roundabouts" setting off, roundabouts (`junction=roundabout` /
 ### Names
 
 Titles are written automatically: routes `Bus <ref>: VILLE Arret → VILLE Arret`, route masters `Bus <ref>: VILLE Arret ↔ VILLE Arret` (the two termini most
-trips use); the prefix follows the mode (`Coach`, `Trolleybus`…). The town comes from Nominatim, in capitals and without accents, and a
+trips use); the prefix follows the mode (`Coach`, `Trolleybus`…) and can be changed for each mode on the Settings page (`Car Nomad 12: …`). The town comes from Nominatim, in capitals and without accents, and a
 town the stop name says already is moved first, never written twice. Variants sharing their termini read `A → X → Y → B`, and get `via=X;Y`.
+
+On a stop shared by several networks, the first in priority holds `ref` and the others `ref:<network>`. Before the download, a window corrects the refs found in the
+place of another network, lists what is left to check and lets you order the networks; the order is kept in the `stop_owners` setting. It also proposes the refs the GTFS shows to be obsolete,
+removed only when you ask, and lets you remove any ref of the platforms of the file by hand.
 
 Platforms, stop_positions and `from`/`to` keep the official GTFS name, unless you choose the `TOWN - Stop` form for stop names.
 

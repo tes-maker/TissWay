@@ -6,9 +6,6 @@
 import { settings } from "./settings.js";
 import { counter, mostCommon } from "./util.js";
 
-const MODE_LABELS = { bus: "Bus", coach: "Coach", trolleybus: "Trolleybus", tram: "Tram", train: "Train", subway: "Subway",
-  ferry: "Ferry", monorail: "Monorail", funicular: "Funicular", aerialway: "Aerialway" };
-
 export const unaccent = (s) => s.normalize("NFKD").replace(/\p{M}/gu, "");
 
 export const slug = (s) => unaccent(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -155,10 +152,10 @@ export function townedName(places, name) {
   return `${upperTown(towns[0])} - ${name}`;
 }
 
-/** Title of a route relation or a route_master. A ":" in a stop name would be read as the end of the "<Mode> <ref>:" part. OSM takes 255
+/** Title of a route relation or a route_master. A ":" in a stop name would be read as the end of the "<Prefix> <ref>:" part (settings.prefixes). OSM takes 255
  * characters in a tag: alternatives are tried from the most complete. */
 export function routeName(mode, ref, ...labels) {
-  const prefix = MODE_LABELS[mode] || mode[0].toUpperCase() + mode.slice(1);
+  const prefix = settings.prefixes[mode] || mode[0].toUpperCase() + mode.slice(1);
   const titles = labels.map((label) => {
     const text = label.replace(/\s*:\s*/g, " - ");
     return ref ? `${prefix} ${ref}: ${text}` : `${prefix}: ${text}`;
