@@ -119,19 +119,24 @@ const unescapeXml = (s) => s.replace(/&(#x?[0-9a-fA-F]+|amp|lt|gt|quot|apos);/g,
 const tagValues = (...values) => [...new Set(values.flatMap((v) => (v || "").split(";").map((x) => x.trim()).filter(Boolean)))];
 const networkSuffix = (network) => network.trim().replace(/\s+/g, "_").replace(/[^\p{L}\p{N}_.-]/gu, "");
 
-/** Stop ids exported for a platform: for each feed the stop of the first network, the one holding ref without suffix. A value known as the ref of another network
- * is left out, unless nothing else remains. Without any ref to tell, the last id of the feed. */
-function exportedStopIds(t, networks) {
-  const bases = ["ref", ...settings.stop_ref_tags.filter((k) => !k.startsWith("gtfs:"))];
-  const first = new Set(tagValues(...bases.map((k) => t[k])));
-  const others = new Set(tagValues(...bases.flatMap((base) => networks.slice(1).map((n) => t[`${base}:${networkSuffix(n)}`]))));
-  const holds = (values, id) => values.has(id) || values.has(CODE_IN_ID.exec(id)?.[1]);
-  const isFirst = (id) => holds(first, id);
-  const isOther = (id) => !isFirst(id) && holds(others, id);
+/** Stop ids exported for a platform: the stop of the first network, the one of the tags without suffix (ref=chuo02, ref:FR:Atoumod=FR:14118:ZE:chuo02:...), taken from
+ * these tags if needed. The id of another network is left out, its ref:*:<network> holds it (network names do not matter: ref:Nomad can be the ref of Nomad Car), unless
+ * nothing else remains. An id that no ref tells about is of another feed, and stays. Without any ref to tell, the last id of a feed. */
+function exportedStopIds(t) {
+  const code = (id) => CODE_IN_ID.exec(id)?.[1];
+  const refKeys = Object.keys(t).filter((k) => k.startsWith("ref:"));
+  const bases = new Set([...settings.stop_ref_tags.filter((k) => !k.startsWith("gtfs:")), ...refKeys.filter((k) => refKeys.some((o) => o.startsWith(`${k}:`)))]);
+  const suffixed = Object.keys(t).filter((k) => !bases.has(k) && (k.startsWith("ref:") || [...bases].some((base) => k.startsWith(`${base}:`))));
+  const ownIds = tagValues(...[...bases].map((k) => t[k]), ...refKeys.flatMap((k) => tagValues(t[k]).filter((v) => t.ref && code(v) === t.ref)));
+  const first = new Set([...tagValues(t.ref), ...ownIds]);
+  const others = new Set(tagValues(...suffixed.map((k) => t[k])));
+  const isFirst = (id) => first.has(id) || first.has(code(id));
+  const isOther = (id) => !isFirst(id) && (others.has(id) || others.has(code(id)));
   const feedKeys = Object.keys(t).filter((k) => /^gtfs:stop_id:(?!\d+$).+/.test(k));
   const ofFeed = (ids) => ids.filter(isFirst).at(-1) ?? ids.filter((id) => !isOther(id)).at(-1) ?? ids.at(-1);
   const ids = tagValues(t["gtfs:stop_id"], ...feedKeys.map((k) => ofFeed(tagValues(t[k]))));
   const kept = ids.filter((id) => !isOther(id));
+  if (!kept.some(isFirst) && ownIds.length) kept.push(ownIds[0]);
   return kept.length ? kept : ids;
 }
 
@@ -156,7 +161,7 @@ function outputPlatformTags(tags) {
   }
 
   const feedStopIds = Object.keys(out).filter((k) => /^gtfs:stop_id:(?!\d+$).+/.test(k));
-  const stopIds = exportedStopIds(out, networks);
+  const stopIds = exportedStopIds(out);
   if (stopIds.length) out["gtfs:stop_id"] = stopIds.join(";");
   for (const k of feedStopIds) delete out[k];
 

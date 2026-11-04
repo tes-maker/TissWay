@@ -15,7 +15,7 @@
 
 import { dist } from "./geo.js";
 import { unaccent } from "./naming.js";
-import { CODE_IN_ID, NETWORK_KEYS, nameNumberedNetworkTags, refKeyFor, sizeOf } from "./platforms.js";
+import { CODE_IN_ID, NETWORK_KEYS, nameNumberedNetworkTags, refKeyFor, refKeyOn, sizeOf } from "./platforms.js";
 import { settings } from "./settings.js";
 import { log } from "./util.js";
 
@@ -46,7 +46,7 @@ function valuesOfStops(stops, ofStop) {
 }
 
 /** The ref tags of a network on these tags. */
-const slotOf = (t, base, network) => (network === t.network ? base : refKeyFor(base, network));
+const slotOf = (t, base, network) => (network === t.network ? base : refKeyOn(t, base, network));
 
 /** Every value of the feed that a ref can hold, whichever networks call at the stop. */
 function feedValues(stops) {
@@ -111,9 +111,10 @@ function promote(t, network, bases) {
   const number = Object.keys(t).find((k) => /^network:\d+$/.test(k) && t[k] === network);
   if (!old || !number) return false;
   for (const base of bases) {
-    const [mine, theirs] = [t[base], t[refKeyFor(base, network)]];
+    const slot = refKeyOn(t, base, network);
+    const [mine, theirs] = [t[base], t[slot]];
     delete t[base];
-    delete t[refKeyFor(base, network)];
+    delete t[slot];
     if (mine !== undefined) t[refKeyFor(base, old)] = mine;
     if (theirs !== undefined) t[base] = theirs;
   }

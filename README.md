@@ -56,8 +56,9 @@ and GTFS keys, and `test/pipeline.test.js` runs them on generated relations.
 - **platform**: `public_transport=platform`, `highway=bus_stop` (`highway=platform` on a way, `bus_stop` being for nodes only), `bus=yes`.
   An existing `route_ref` gets the line, none is created from a partial selection.
 - **one physical stop, several networks**: exported platforms combine `network` and its Wikidata/Wikipedia values in network order, separated by `;`.
-  `gtfs:stop_id` contains one ID per feed, that of the stop of the first network (the one holding `ref` without suffix), the IDs of the other networks
-  staying in their `ref:*:<network>` tags (`ref:FR:Atoumod:Nomad`). A second stop of the same network is the one across the
+  `gtfs:stop_id` is the ID of the stop of the first network, the one of `ref` and `ref:FR:Atoumod` without suffix, taken from them if needed. The IDs of the other
+  networks are found in their `ref:*:<network>` tags (`ref:FR:Atoumod:Nomad`). IDs of other feeds stay. A platform read as `network=Twisto;Nomad Car` is two networks, and
+  a ref under a shorter name (`ref:Nomad` for `Nomad Car`) stays under that name. A second stop of the same network is the one across the
   road: the one on the good side stays, the other is removed.
 - **network-specific metadata**: `gtfs:stop_code:<feed>` is the code of the first network only: the code of another network is not exported
   (no `gtfs:stop_code:<feed>:Nomad`). References keep their network-specific keys (`ref:Nomad`, `ref:FR:Atoumod:Nomad`).
