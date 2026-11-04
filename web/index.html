@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src *; img-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>tissway: GTFS to OSM converter</title>
+  <meta name="description" content="Convert a GTFS feed into OpenStreetMap public transport relations, in your browser.">
+  <link rel="icon" href="tissway.svg" type="image/svg+xml">
+  <link rel="preload" href="d-din/D-DIN.otf" as="font" type="font/otf" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <script src="theme.js"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+<header class="bar">
+  <button class="home" data-view="generate" aria-label="tissway, back to the converter"><span class="logo"></span></button>
+  <nav class="nav" aria-label="Pages">
+    <button data-view="generate" aria-current="page">Converter</button>
+    <button data-view="settings">Settings <span id="settings-count" class="count" hidden></span></button>
+    <label class="check theme"><input id="theme-toggle" type="checkbox" role="switch"> Dark</label>
+  </nav>
+</header>
+
+<main id="view-generate" class="converter">
+  <div class="hero">
+    <h1>GTFS to OSM converter</h1>
+    <p>Turn a public transport feed into OpenStreetMap relations, ready to review in JOSM. No sign-up, nothing to install.</p>
+  </div>
+
+  <section class="box" aria-label="Converter">
+    <div id="source">
+      <label id="drop" class="drop">
+        <input id="file-input" type="file" accept=".zip,.osm,.xml,application/zip">
+        <svg viewBox="0 0 24 24" width="44" height="44" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        <span class="drop-button">Choose a file</span>
+        <span class="drop-hint">or drop it here</span>
+        <span class="drop-formats">GTFS .zip, or an .osm file to add “via” to its route names</span>
+      </label>
+      <div class="or"><span>or use a Mobility Database feed</span></div>
+      <div class="id-row">
+        <label class="sr-only" for="gtfs-id">Mobility Database ID</label>
+        <input id="gtfs-id" placeholder="Feed ID, e.g. tdg-81942" spellcheck="false" autocomplete="off">
+        <button id="gtfs-load">Load feed</button>
+      </div>
+    </div>
+
+    <div id="chip" class="chip" hidden>
+      <span class="chip-mark" aria-hidden="true">✓</span>
+      <span class="chip-text"><b id="chip-name"></b><small id="chip-info"></small></span>
+      <button id="chip-change" class="link">Change</button>
+    </div>
+
+    <div id="loading" class="working" hidden>
+      <p id="gtfs-status" role="status"></p>
+      <progress id="gtfs-progress"></progress>
+      <button id="cancel-load" class="link danger">Cancel</button>
+    </div>
+
+    <div id="options" class="options" hidden>
+      <label>Network
+        <select id="network"></select>
+      </label>
+
+      <fieldset class="formats">
+        <legend>Convert to</legend>
+        <label><input type="radio" name="format" value="routes" checked><span><b>Route relations</b><small>.osm</small></span></label>
+        <label><input type="radio" name="format" value="platforms"><span><b>Platforms</b><small>.osm + .csv</small></span></label>
+        <label><input type="radio" name="format" value="ptna"><span><b>PTNA list</b><small>.txt</small></span></label>
+      </fieldset>
+
+      <div data-panel="routes" class="panel">
+        <fieldset class="formats two">
+          <legend>Stop names</legend>
+          <label><input type="radio" name="stop_names" value="gtfs" checked><span><b>Official name</b><small>as in the GTFS</small></span></label>
+          <label><input type="radio" name="stop_names" value="town"><span><b>TOWN - Stop</b><small>e.g. CAEN - Gare</small></span></label>
+        </fieldset>
+        <label class="check"><input id="split-roundabouts" type="checkbox" role="switch"> Split roundabouts</label>
+        <label>Line, one at a time
+          <input id="line-filter" type="search" placeholder="Search a line: 122, Caen…" autocomplete="off">
+        </label>
+        <div id="lines" class="lines" role="group" aria-label="Lines of the network"></div>
+      </div>
+
+      <div data-panel="platforms" class="panel" hidden>
+        <p class="hint">Adds the GTFS stops to the existing OSM platforms of the whole network. The CSV lists the stops without a platform.</p>
+        <label class="narrow">Maximum distance, stop to platform
+          <span class="with-unit"><input id="platforms-distance" type="number" min="1" max="200" value="30"><span class="unit">m</span></span>
+        </label>
+      </div>
+
+      <div data-panel="ptna" class="panel" hidden>
+        <p class="hint">The route list of the whole network for the OSM wiki.</p>
+        <details class="more">
+          <summary>Update an existing page, title, operator</summary>
+          <label>Current PTNA page
+            <textarea id="ptna-input" rows="4" spellcheck="false"></textarea>
+          </label>
+          <div class="pair">
+            <label>Title <input id="ptna-title" placeholder="network name"></label>
+            <label>Operator <input id="ptna-operator" placeholder="from the GTFS"></label>
+          </div>
+          <label class="check"><input id="ptna-ref" type="checkbox" role="switch"> Replace refs with those of the GTFS</label>
+        </details>
+      </div>
+    </div>
+
+    <div id="via" class="panel" hidden>
+      <label>Only names starting with (optional)
+        <input id="via-prefix" placeholder="Bus 117:">
+      </label>
+    </div>
+
+    <div id="action" class="action" hidden>
+      <button id="convert" class="cta"></button>
+    </div>
+
+    <div id="working" class="working" hidden>
+      <p id="progress" role="status"></p>
+      <progress></progress>
+      <button id="cancel" class="link danger">Cancel</button>
+    </div>
+
+    <div id="error" class="error" role="alert" hidden></div>
+  </section>
+
+  <section id="result" class="box result" hidden tabindex="-1">
+    <h2><span class="done-mark" aria-hidden="true">✓</span> Your file is ready</h2>
+    <div id="downloads" class="downloads"></div>
+    <p id="summary" class="summary"></p>
+    <p class="hint">Review the file in JOSM before uploading it: nothing is sent to OpenStreetMap from here.</p>
+    <button id="show-warnings" class="warnings" hidden></button>
+    <details id="detected-box" class="more" hidden>
+      <summary>Found online for this run</summary>
+      <dl id="detected" class="pairs"></dl>
+    </details>
+    <details id="preview-box" class="more" hidden>
+      <summary>Preview</summary>
+      <textarea id="preview" rows="10" readonly aria-label="Preview"></textarea>
+    </details>
+    <button id="again" class="link">Convert something else</button>
+  </section>
+
+  <details id="log-box" class="log">
+    <summary>Activity log <span id="warning-count" class="count warn" hidden></span></summary>
+    <ol id="journal" class="journal" tabindex="0" aria-label="Activity log" data-empty="Nothing yet."></ol>
+    <div class="log-foot">
+      <label class="check"><input id="only-warnings" type="checkbox" role="switch"> Warnings only</label>
+      <label class="check"><input id="verbose" type="checkbox" role="switch"> Network calls</label>
+      <span class="group">
+        <button id="journal-copy" class="small">Copy</button>
+        <button id="journal-clear" class="small">Clear</button>
+      </span>
+    </div>
+  </details>
+
+  <ol class="how">
+    <li><b>Add your feed</b><span>A GTFS file, or its Mobility Database ID.</span></li>
+    <li><b>Pick a line</b><span>Networks and tags are found online for you.</span></li>
+    <li><b>Download and review</b><span>Open the .osm file in JOSM, then upload it.</span></li>
+  </ol>
+</main>
+
+<main id="view-settings" class="settings" hidden>
+  <div class="settings-head">
+    <div>
+      <h1>Settings</h1>
+      <p class="hint">Nothing to change to get started. Your changes stay in this browser.</p>
+    </div>
+    <div class="group wrap">
+      <label class="file-button">Import<input id="settings-import" type="file" accept=".json,application/json"></label>
+      <button id="settings-export">Export</button>
+      <button id="cache-clear">Clear cached data</button>
+      <button id="settings-reset" class="danger">Reset all</button>
+    </div>
+  </div>
+  <label class="search">Find a setting
+    <input id="settings-search" type="search" autocomplete="off" placeholder="platform, Valhalla, accents…">
+  </label>
+  <p id="settings-status" class="status" role="status"></p>
+  <div id="settings-form" class="stack"></div>
+</main>
+
+<footer class="foot">
+  Map data © OpenStreetMap contributors · Mobility Database, Valhalla, Overpass, Nominatim, Wikidata, Wiktionary · <a href="https://github.com/tes-maker/TissWay">Source code</a>
+</footer>
+</body>
+</html>
