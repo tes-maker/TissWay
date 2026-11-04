@@ -42,13 +42,23 @@ test("nearestPairs: one to one, nearest first", () => {
   assert.deepEqual([...pairs.keys()], ["B"]); // A does not end up on the platform of B
 });
 
-test("feedTags names the numbered refs", () => {
-  const t = feedTags({ network: "Twisto", "network:2": "Nomad", ref: "a", "ref:2": "b" }, { stop_id: "S", stop_name: "G", route_ref: new Set(), wheelchair_boarding: "" }, "F");
+test("feedTags names network-specific tags", () => {
+  const t = feedTags({ network: "Twisto", "network:2": "Nomad", "network:wikidata": "Q1", "network:wikidata:2": "Q2",
+    ref: "a", "ref:2": "b", "gtfs:stop_code:F": "fadr01" },
+  { stop_id: "S", stop_name: "G", stop_code: "14CAE13A", route_ref: new Set(), wheelchair_boarding: "" }, "F", "Nomad");
   assert.deepEqual([t.ref, t["ref:Nomad"], t["ref:2"]], ["a", "b", undefined]);
+  assert.deepEqual([t["network:wikidata"], t["network:wikidata:Nomad"]], ["Q1", "Q2"]);
+  assert.deepEqual([t["gtfs:stop_code:F"], t["gtfs:stop_code:F:Nomad"]], ["fadr01", "14CAE13A"]);
 });
 
 test("feedTags", () => {
   configure();
-  const t = feedTags({ route_ref: "10;2" }, { stop_id: "S", stop_name: "Gare", route_ref: new Set(["3"]), wheelchair_boarding: "1" }, "F");
-  assert.deepEqual(t, { route_ref: "2;3;10", "gtfs:stop_id:F": "S", "gtfs:stop_name:F": "Gare", bus: "yes", wheelchair: "yes" });
+  const t = feedTags({ name: "Gare", route_ref: "10;2" }, { stop_id: "S", stop_name: "Gare", route_ref: new Set(["3"]), wheelchair_boarding: "1" }, "F");
+  assert.deepEqual(t, { name: "Gare", route_ref: "2;3;10", "gtfs:stop_id:F": "S", bus: "yes", wheelchair: "yes" });
+});
+
+test("feedTags keeps the GTFS stop name when it differs from the OSM name", () => {
+  configure();
+  const t = feedTags({ name: "Gare historique" }, { stop_id: "S", stop_name: "Gare", route_ref: new Set(), wheelchair_boarding: "" }, "F");
+  assert.equal(t["gtfs:stop_name:F"], "Gare");
 });

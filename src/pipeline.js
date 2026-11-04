@@ -22,7 +22,7 @@ import { lookup } from "./lookup.js";
 import { accentsFrom, agencyNetworks, cleanStopName, fixAccents, nameKey, routeLabel, slug, townedName, words } from "./naming.js";
 import { services, valhallaReady } from "./net.js";
 import { Store, completeWayNodes, platformsIn, readWays, routesIn, writeOsm } from "./osm.js";
-import { filterRoadPlatforms, tagPlatforms } from "./platforms.js";
+import { filterRoadPlatforms, nameNumberedNetworkTags, networkKeyFor, tagPlatforms } from "./platforms.js";
 import { reviewRefs } from "./ref_review.js";
 import { activeFeed, settings } from "./settings.js";
 import { splitWays } from "./splitting.js";
@@ -72,9 +72,8 @@ export function withWikis(networks, wikis) {
   return out;
 }
 
-/** Add the network:wikidata / network:wikipedia of the known networks to the objects of the output file that lack them:
- * route relations, route masters and platforms whose network, network:2... is one of them; the wiki keys get the same
- * suffix. Values already set are kept. Returns the number of objects completed. */
+/** Add network:wikidata / network:wikipedia to route relations, route masters and platforms that lack them.
+ * Secondary networks keep their name in the key. Values already set are kept. Returns the number of objects completed. */
 export function completeWikis(obj, networks) {
   const wikis = {};
   for (const t of Object.values(networks)) {
@@ -82,15 +81,20 @@ export function completeWikis(obj, networks) {
   }
   let done = 0;
   for (const [key, o] of obj.modified) {
-    const tags = o.tags || {};
+    const tags = { ...(o.tags || {}) };
     if (!["route", "route_master"].includes(tags.type) && tags.public_transport !== "platform") continue;
+    const hadNumberedTags = Object.keys(tags).some((k) => /^(?:network:wikidata|network:wikipedia|gtfs:stop_code(?::[A-Z][A-Z][a-zA-Z0-9_.-]+)?):\d+$/.test(k));
+    nameNumberedNetworkTags(tags);
     const added = {};
-    for (const suffix of ["", ":2", ":3", ":4", ":5", ":6", ":7", ":8", ":9"]) {
-      for (const [k, v] of Object.entries(wikis[tags[`network${suffix}`]] || {})) {
-        if (!(`${k}${suffix}` in tags)) added[`${k}${suffix}`] = v;
+    const networkTags = Object.keys(tags).filter((k) => /^network(?::\d+)?$/.test(k)).sort((a, b) => a === "network" ? -1 : b === "network" ? 1 : Number(a.slice(8)) - Number(b.slice(8)));
+    for (const key of networkTags) {
+      const network = tags[key];
+      for (const [wiki, value] of Object.entries(wikis[network] || {})) {
+        const target = key === "network" ? wiki : networkKeyFor(wiki, network);
+        if (!(target in tags)) added[target] = value;
       }
     }
-    if (Object.keys(added).length) {
+    if (Object.keys(added).length || hadNumberedTags) {
       obj.set(key, { ...o, tags: { ...tags, ...added } });
       done++;
     }

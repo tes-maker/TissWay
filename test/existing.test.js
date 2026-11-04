@@ -128,7 +128,7 @@ test("completeWikis on the objects of the file", () => {
   assert.equal(completeWikis(obj, networks), 2);
   assert.deepEqual(obj.get("r1").tags, { type: "route", network: "Astuce", "network:wikidata": "Q1", "network:wikipedia": "fr:Réseau Astuce" });
   assert.deepEqual(obj.get("n1").tags, { public_transport: "platform", network: "Twisto", "network:2": "Astuce", "network:wikidata": "Q3537947",
-    "network:wikidata:2": "Q3537964", "network:wikipedia:2": "fr:Réseau Astuce" });
+    "network:wikidata:Astuce": "Q3537964", "network:wikipedia:Astuce": "fr:Réseau Astuce" });
   assert.deepEqual(obj.get("r2").tags, { type: "route", network: "lcn" });
   assert.ok(!("network:wikidata" in obj.get("w1").tags));
   assert.ok(!obj.modified.has("r9")); // objects outside the file are not added to it
