@@ -114,6 +114,36 @@ const unescapeXml = (s) => s.replace(/&(#x?[0-9a-fA-F]+|amp|lt|gt|quot|apos);/g,
   return String.fromCodePoint(e[1] === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1)));
 });
 
+const tagValues = (...values) => [...new Set(values.flatMap((v) => (v || "").split(";").map((x) => x.trim()).filter(Boolean)))];
+const networkSuffix = (network) => network.trim().replace(/\s+/g, "_").replace(/[^\p{L}\p{N}_.-]/gu, "");
+
+/** Compact network and GTFS stop ids on exported platforms, without changing the in-memory tags used during processing. */
+function outputPlatformTags(tags) {
+  const out = { ...tags };
+  const numberedNetworks = Object.keys(out).filter((k) => /^network:\d+$/.test(k)).sort((a, b) => Number(a.slice(8)) - Number(b.slice(8)));
+  const networks = tagValues(out.network, ...numberedNetworks.map((k) => out[k]));
+
+  if (numberedNetworks.length) {
+    out.network = networks.join(";");
+    numberedNetworks.forEach((k) => delete out[k]);
+  }
+
+  for (const key of ["network:wikidata", "network:wikipedia"]) {
+    const numbered = Object.keys(out).filter((k) => k.startsWith(`${key}:`) && /^\d+$/.test(k.slice(key.length + 1)));
+    const named = networks.slice(1).map((network) => `${key}:${networkSuffix(network)}`).filter((k) => k in out);
+    const values = tagValues(out[key], ...numbered.sort((a, b) => Number(a.slice(key.length + 1)) - Number(b.slice(key.length + 1))).map((k) => out[k]),
+      ...named.map((k) => out[k]));
+    if (values.length) out[key] = values.join(";");
+    for (const k of [...numbered, ...named]) delete out[k];
+  }
+
+  const feedStopIds = Object.keys(out).filter((k) => /^gtfs:stop_id:(?!\d+$).+/.test(k));
+  const stopIds = tagValues(out["gtfs:stop_id"], ...feedStopIds.map((k) => (out[k] || "").split(";").map((v) => v.trim()).filter(Boolean).at(-1)));
+  if (stopIds.length) out["gtfs:stop_id"] = stopIds.join(";");
+  for (const k of feedStopIds) delete out[k];
+  return out;
+}
+
 /** Modified objects (and the nodes of their ways) as a JOSM .osm file. */
 export function writeOsm(obj) {
   const keys = new Set(obj.modified.keys());
@@ -133,7 +163,8 @@ export function writeOsm(obj) {
     for (const [ref, role] of o.members || []) {
       body.push(`    <member type="${MEMBER_TYPES[ref[0]]}" ref="${ref.slice(1)}" role="${escapeXml(role)}" />`);
     }
-    for (const [k, v] of Object.entries(o.tags)) body.push(`    <tag k="${escapeXml(k)}" v="${escapeXml(v)}" />`);
+    const tags = o.tags.public_transport === "platform" ? outputPlatformTags(o.tags) : o.tags;
+    for (const [k, v] of Object.entries(tags)) body.push(`    <tag k="${escapeXml(k)}" v="${escapeXml(v)}" />`);
     const tag = MEMBER_TYPES[key[0]];
     lines.push(...(body.length ? [`  <${tag} ${attrs}>`, ...body, `  </${tag}>`] : [`  <${tag} ${attrs} />`]));
   }
