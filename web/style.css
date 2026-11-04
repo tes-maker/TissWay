@@ -29,11 +29,10 @@
   --console-warn: #f3c26b;
   --console-error: #ff9c94;
   --shadow: 0 2px 4px rgb(20 26 46 / 5%), 0 12px 32px rgb(20 26 46 / 8%);
-  --logo: #0000ff;
+  --logo: var(--accent);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --logo: #aebbff;
   --bg: #0e1120;
   --surface: #181c2e;
   --sunken: #12162a;
