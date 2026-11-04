@@ -8,9 +8,13 @@
 // feed no longer on the platform, a gtfs:stop_id:<feed> or gtfs:stop_code:<feed> unknown to this feed. Nothing is removed without being asked for: the
 // feed may be partial, and a mapper may have had a reason. The refs of the networks outside the feed cannot be judged, they can only be removed by hand.
 //
+// Two networks with very close names ("Nomad Car" and "Nomad") may be one network under two names: the window asks, nothing is merged without an answer.
+// The answer is kept in settings.network_merges, because each run brings the name of the feed back.
+//
 // The review keeps the ref tags detected by the run: changing a setting afterwards resets what a run detected.
 
 import { dist } from "./geo.js";
+import { unaccent } from "./naming.js";
 import { CODE_IN_ID, NETWORK_KEYS, nameNumberedNetworkTags, refKeyFor, sizeOf } from "./platforms.js";
 import { settings } from "./settings.js";
 import { log } from "./util.js";
@@ -127,6 +131,92 @@ function promote(t, network, bases) {
   return true;
 }
 
+/** Words of a network name, case, accents and punctuation ignored. */
+const nameWords = (name) => unaccent(name).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+
+/** Same name, or the whole of one at the start or at the end of the other: "Nomad" and "Nomad Car". */
+export function closeNames(a, b) {
+  const [short, long] = [nameWords(a), nameWords(b)].sort((x, y) => x.length - y.length);
+  if (!short.length) return false;
+  return short.every((w, i) => w === long[i]) || short.every((w, i) => w === long[long.length - short.length + i]);
+}
+
+/** Network -> objects of the file that carry it. */
+function networkCounts(obj) {
+  const counts = new Map();
+  for (const { tags } of obj.modified.values()) for (const network of networksOf(tags ?? {})) counts.set(network, (counts.get(network) ?? 0) + 1);
+  return counts;
+}
+
+/** Pairs of networks of the file that may be one, not answered yet: [{keep, drop, keepCount, dropCount}]. The name kept is the shortest, the one OSM tends to use
+ * (see sizeOf), then the most used. */
+export function closeNetworks(review) {
+  const counts = networkCounts(review.obj);
+  const names = [...counts.keys()].sort((a, b) => nameWords(a).length - nameWords(b).length || counts.get(b) - counts.get(a) || a.localeCompare(b));
+  return names.flatMap((keep, i) => names.slice(i + 1).filter((drop) => closeNames(keep, drop) && settings.network_merges[drop] !== false && review.decisions[drop] !== false)
+    .map((drop) => ({ keep, drop, keepCount: counts.get(keep), dropCount: counts.get(drop) })));
+}
+
+/** One object: the name drop becomes keep, its refs and metadata go to the place of keep. A ref that keep already has with another value stays where it is, to check. */
+function mergeTags(review, key, keep, drop) {
+  const t = review.obj.get(key).tags;
+  nameNumberedNetworkTags(t);
+  if (!networksOf(t).includes(drop)) return false;
+  const both = networksOf(t).includes(keep);
+  if (t.network === drop && !both) {
+    t.network = keep; // its tags are those of the first place, which it keeps
+    return true;
+  }
+  if (t.network === drop) promote(t, keep, [...review.bases, "local_ref"]);
+  const number = Object.keys(t).find((k) => /^network:\d+$/.test(k) && t[k] === drop);
+  const suffix = refKeyFor("", drop);
+  for (const tag of Object.keys(t).filter((k) => k.endsWith(suffix))) {
+    const target = slotOf(t, tag.slice(0, -suffix.length), keep);
+    if (tag === target) continue;
+    if (t[target] === undefined || t[target] === t[tag]) t[target] = t[tag];
+    else if (!tag.startsWith("network:")) {
+      review.toCheck.push(`${t.name || key} (${key}): ${tag}=${t[tag]} left in place, ${target} already holds ${t[target]}`);
+      continue;
+    }
+    delete t[tag];
+  }
+  if (both) {
+    delete t[number];
+    const numbered = Object.keys(t).filter((k) => /^network:\d+$/.test(k)).sort((a, b) => Number(a.slice(8)) - Number(b.slice(8)));
+    const values = numbered.map((k) => t[k]);
+    numbered.forEach((k) => delete t[k]);
+    values.forEach((value, i) => { t[`network:${i + 2}`] = value; });
+  } else t[number] = keep;
+  return true;
+}
+
+/** Merge drop into keep on every object of the file. Returns the number of objects changed. */
+function mergeInFile(review, keep, drop) {
+  const changed = [...review.obj.modified.keys()].filter((key) => review.obj.get(key).tags && mergeTags(review, key, keep, drop)).length;
+  if (changed) {
+    const line = `${drop} merged into ${keep} on ${changed} object${changed === 1 ? "" : "s"}`;
+    review.corrected.push(line);
+    log.info(`Network merged: ${line}`);
+  }
+  return changed;
+}
+
+/** The answer yes in the window: keep takes the rank of the higher of the two in the priority. */
+export function mergeNetworks(review, keep, drop) {
+  const changed = mergeInFile(review, keep, drop);
+  review.decisions[drop] = keep;
+  review.feedNetworks.add(keep);
+  for (const row of review.removed) if (row.network === drop) row.network = keep;
+  const shared = new Set(platformKeys(review.obj).map((key) => networksOf(review.obj.get(key).tags)).filter((nets) => nets.length > 1).flat());
+  applyPriority(review, [...new Set(review.order.map((n) => (n === drop ? keep : n)))].filter((n) => shared.has(n)));
+  return changed;
+}
+
+/** The answer no in the window: this name is no longer proposed. */
+export function keepNetworkApart(review, drop) {
+  review.decisions[drop] = false;
+}
+
 const platformKeys = (obj) => [...obj.modified].filter(([, o]) => isPlatform(o.tags)).map(([key]) => key);
 
 /** The order proposed: the networks of settings.stop_owners in their order, then the fewest stops first, then those holding the most platforms. */
@@ -224,10 +314,14 @@ export function applyPriority(review, order) {
 /** Correct and review the refs of the platforms of the file: {obj, order, corrected, toCheck, removed}. Without settings.stop_owners, a platform only changes
  * owner when both sizes are known, like during the run (see takesOver).
  * sizes, ofStop: see stopNetworks. stops: the GTFS stops. feed: suffix of the gtfs:* tags. */
-export function reviewRefs(obj, { sizes = null, ofStop = new Map(), stops = [], feed = "" } = {}) {
+export function reviewRefs(obj, { sizes = null, ofStop: feedOfStop = new Map(), stops = [], feed = "" } = {}) {
+  const merges = Object.entries(settings.network_merges).filter(([, keep]) => typeof keep === "string");
+  const merged = new Map(merges);
+  const ofStop = new Map([...feedOfStop].map(([stop, names]) => [stop, new Set([...names].map((n) => merged.get(n) ?? n))]));
   const stopCode = feed ? `gtfs:stop_code:${feed}` : "gtfs:stop_code";
   const review = { obj, feed, removed: [], inFeed: feedValues(stops), feedNetworks: new Set([...ofStop.values()].flatMap((names) => [...names])), known: valuesOfStops(stops, ofStop), bases: ["ref", ...settings.stop_ref_tags, stopCode], reach_m: settings.thresholds.holder_m,
-    corrected: [], toCheck: [], order: [] };
+    corrected: [], toCheck: [], order: [], decisions: {} };
+  for (const [drop, keep] of merges) mergeInFile(review, keep, drop);
   const keys = platformKeys(obj);
   const networks = new Set(), held = new Map();
   for (const key of keys) {

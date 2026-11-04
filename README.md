@@ -67,6 +67,9 @@ and GTFS keys, and `test/pipeline.test.js` runs them on generated relations.
   is not copied, and is reported too.
   The owner is the network in place; a network with fewer stops in the feed (local rather than regional) takes over, unless the
   "Networks owning their stops" setting names them.
+- **very close network names**: when the names of two networks of the file are the same or one starts or ends the other (`Nomad` and `Nomad Car`), the
+  window before the download asks if they are one network. Yes: platforms and relations go under the shortest name, with the refs and metadata of the other
+  in its place; two different refs are left as they are and reported. Nothing is merged without this answer, which is kept in the "Merged network names" setting.
 - **stop_position**: `public_transport=stop_position`, `bus=yes`, on the way.
 - **PTNA list**: `operator` stays empty unless you give one, since PTNA compares it with the OSM relations.
 

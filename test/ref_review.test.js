@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import "./helpers.js";
 import { Store } from "../src/osm.js";
-import { applyPriority, listRefs, networksOf, priorityRows, removeRef, restoreRef, reviewRefs } from "../src/ref_review.js";
+import { applyPriority, closeNames, closeNetworks, keepNetworkApart, listRefs, mergeNetworks, networksOf, priorityRows, removeRef, restoreRef, reviewRefs } from "../src/ref_review.js";
 import { settings } from "../src/settings.js";
 
 const TWISTO_ID = "FR:14118:ZE:chuo02:ATOUMOD029", NOMAD_ID = "FR:14118:ZE:1151928:ATOUMOD040";
@@ -178,4 +178,90 @@ test("priorityRows says what the order gives each network, and follows it", () =
   applyPriority(review, ["Nomad", "Twisto"]);
   assert.equal(row("Nomad").holds, 1);
   assert.equal(row("Twisto").holds, 0);
+});
+
+const CAR = { name: "Mont Coco", public_transport: "platform", network: "Nomad", "network:2": "Nomad Car" };
+
+test("very close names: whole words at the start or the end, case and accents ignored", () => {
+  for (const [a, b] of [["Nomad", "Nomad Car"], ["Nomad", "Réseau Nomad"], ["NOMAD", "Nomad"], ["Bus Verts", "Bus-Verts du Calvados"], ["Réseau", "RESEAU"]]) assert.ok(closeNames(a, b), `${a} / ${b}`);
+  for (const [a, b] of [["Nomad", "Twisto"], ["Nomad", "Nomads"], ["Bus", "Le Bus Vert"], ["Nomad Car", "Nomad Train"]]) assert.ok(!closeNames(a, b), `${a} / ${b}`);
+});
+
+test("close networks are proposed, the shortest name kept, and nothing changes without an answer", () => {
+  const obj = store({ ...CAR, ref: "A", "ref:Nomad_Car": "B" });
+  const review = reviewRefs(obj);
+  assert.deepEqual(closeNetworks(review), [{ keep: "Nomad", drop: "Nomad Car", keepCount: 1, dropCount: 1 }]);
+  assert.equal(obj.get("n1").tags["network:2"], "Nomad Car");
+  assert.deepEqual(closeNetworks(reviewRefs(store(SHARED))), []);
+});
+
+test("merged: one network, its refs and metadata in its place", () => {
+  const obj = store({ ...CAR, "network:3": "Twisto", "ref:Nomad_Car": "B", "network:wikidata:Nomad_Car": "Q1", "ref:Twisto": "T" });
+  const review = reviewRefs(obj);
+  assert.equal(mergeNetworks(review, "Nomad", "Nomad Car"), 1);
+  const t = obj.get("n1").tags;
+  assert.deepEqual([t.network, t["network:2"], t["network:3"], t.ref, t["ref:Nomad_Car"], t["network:wikidata"], t["network:wikidata:Nomad_Car"], t["ref:Twisto"]],
+    ["Nomad", "Twisto", undefined, "B", undefined, "Q1", undefined, "T"]);
+  assert.deepEqual(closeNetworks(review), []);
+  assert.match(review.corrected.at(-1), /Nomad Car merged into Nomad on 1 object/);
+  assert.equal(review.decisions["Nomad Car"], "Nomad");
+});
+
+test("merged when the name dropped owns the platform: the name kept takes its place", () => {
+  const obj = store({ ...CAR, network: "Nomad Car", "network:2": "Nomad", ref: "B", "ref:Nomad": "A" });
+  const review = reviewRefs(obj);
+  mergeNetworks(review, "Nomad", "Nomad Car");
+  const t = obj.get("n1").tags;
+  assert.deepEqual([t.network, t["network:2"], t.ref], ["Nomad", undefined, "A"]);
+  assert.equal(t["ref:Nomad_Car"], "B"); // two different refs: left for the mapper
+  assert.match(review.toCheck.at(-1), /ref:Nomad_Car=B left in place, ref already holds A/);
+});
+
+test("merged: the same ref twice is one ref, and a name alone is renamed", () => {
+  const same = store({ ...CAR, ref: "A", "ref:Nomad_Car": "A" });
+  mergeNetworks(reviewRefs(same), "Nomad", "Nomad Car");
+  assert.deepEqual([same.get("n1").tags.ref, same.get("n1").tags["ref:Nomad_Car"]], ["A", undefined]);
+
+  const alone = store({ name: "X", public_transport: "platform", network: "Twisto", "network:2": "Nomad Car", "ref:Nomad_Car": "B" });
+  const review = reviewRefs(alone);
+  mergeNetworks(review, "Nomad", "Nomad Car");
+  const t = alone.get("n1").tags;
+  assert.deepEqual([t.network, t["network:2"], t["ref:Nomad"], t["ref:Nomad_Car"]], ["Twisto", "Nomad", "B", undefined]);
+});
+
+test("merged: the lines of the file follow, and the priority loses the pair no longer shared", () => {
+  const obj = new Store({ n1: { version: "1", lat: 49, lon: 1, tags: { ...CAR, "network:3": "Twisto" } }, n2: { version: "1", lat: 49, lon: 1, tags: { ...CAR } }, r1: { version: "1", members: [], tags: { type: "route", network: "Nomad Car", ref: "12" } } });
+  for (const key of ["n1", "n2", "r1"]) obj.edit(key);
+  const review = reviewRefs(obj);
+  assert.equal(review.order.length, 3);
+  assert.equal(mergeNetworks(review, "Nomad", "Nomad Car"), 3);
+  assert.deepEqual([obj.get("r1").tags.network, obj.get("r1").tags.ref], ["Nomad", "12"]);
+  assert.deepEqual([...review.order].sort(), ["Nomad", "Twisto"]);
+  assert.deepEqual(priorityRows(review).map((r) => r.shared), [1, 1]);
+});
+
+test("the answers are kept: yes merges at the next run, no is not asked again", () => {
+  settings.network_merges = { "Nomad Car": "Nomad" };
+  const obj = store({ ...CAR, ref: "A" });
+  const review = reviewRefs(obj);
+  assert.equal(obj.get("n1").tags["network:2"], undefined);
+  assert.match(review.corrected[0], /Nomad Car merged into Nomad/);
+  assert.deepEqual(closeNetworks(review), []);
+
+  settings.network_merges = {};
+  const asked = reviewRefs(store(CAR));
+  keepNetworkApart(asked, "Nomad Car");
+  assert.deepEqual(closeNetworks(asked), []);
+  settings.network_merges = asked.decisions;
+  const next = store(CAR);
+  assert.deepEqual(closeNetworks(reviewRefs(next)), []);
+  assert.equal(next.get("n1").tags["network:2"], "Nomad Car");
+});
+
+test("the stops of a merged name count for the name kept", () => {
+  settings.network_merges = { "Nomad Car": "Nomad" };
+  const both = new Map([[NOMAD_ID, new Set(["Nomad", "Nomad Car"])], [TWISTO_ID, new Set(["Twisto"])]]);
+  const obj = store({ ...SHARED, ref: "14CAE74A" });
+  reviewRefs(obj, { sizes, ofStop: both, stops });
+  assert.equal(obj.get("n1").tags["ref:Nomad"], "14CAE74A");
 });
