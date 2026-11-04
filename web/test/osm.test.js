@@ -36,6 +36,40 @@ test("writeOsm: modified objects, the nodes of their ways, escaped tags, parsed 
   assert.equal(root.children[0].attrs.version, undefined); // new object
 });
 
+test("writeOsm compacts shared platform network tags and replaces old feed stop ids", () => {
+  const tags = {
+    alt_name: "Péricentre", bench: "yes", bin: "yes", bus: "yes", departures_board: "timetable",
+    "gtfs:stop_code:FR-NOR-Atoumod:Nomad": "14CAE27A",
+    "gtfs:stop_id:FR-NOR-Atoumod": "FR:14118:ZE:peric01:ATOUMOD029;FR:14118:ZE:1151885:ATOUMOD040",
+    highway: "bus_stop", lit: "yes", name: "Péricentre", network: "Twisto", "network:2": "Nomad",
+    "network:wikidata": "Q3537947", "network:wikidata:Nomad": "Q98131290",
+    "network:wikipedia": "fr:Transports en commun de Caen",
+    "network:wikipedia:Nomad": "fr:Nomad (réseau)",
+    operator: "RATP Dev Caen la mer", public_transport: "platform", ref: "peric01",
+    "ref:FR:Atoumod": "FR:14118:ZE:peric01:ATOUMOD029",
+    "ref:FR:Atoumod:Nomad": "FR:14118:ZE:1151885:ATOUMOD040",
+    "ref:Nomad": "14CAE27A", shelter: "no", tactile_paving: "no", wheelchair: "no",
+  };
+  const obj = new Store({ n1: { version: "1", lat: 49, lon: 1, tags } });
+  obj.edit("n1");
+  const originalTags = structuredClone(tags);
+  const root = parseXml(writeOsm(obj));
+  const output = Object.fromEntries(root.children[0].children.map((tag) => [tag.attrs.k, tag.attrs.v]));
+
+  assert.deepEqual(output, {
+    alt_name: "Péricentre", bench: "yes", bin: "yes", bus: "yes", departures_board: "timetable",
+    "gtfs:stop_code:FR-NOR-Atoumod:Nomad": "14CAE27A", "gtfs:stop_id": "FR:14118:ZE:1151885:ATOUMOD040",
+    highway: "bus_stop", lit: "yes", name: "Péricentre", network: "Twisto;Nomad",
+    "network:wikidata": "Q3537947;Q98131290",
+    "network:wikipedia": "fr:Transports en commun de Caen;fr:Nomad (réseau)",
+    operator: "RATP Dev Caen la mer", public_transport: "platform", ref: "peric01",
+    "ref:FR:Atoumod": "FR:14118:ZE:peric01:ATOUMOD029",
+    "ref:FR:Atoumod:Nomad": "FR:14118:ZE:1151885:ATOUMOD040", "ref:Nomad": "14CAE27A",
+    shelter: "no", tactile_paving: "no", wheelchair: "no",
+  });
+  assert.deepEqual(obj.get("n1").tags, originalTags);
+});
+
 test("nearestPairs: one to one, nearest first", () => {
   const stop = (stop_id, lon) => ({ stop_id, lat: 49, lon });
   const pairs = nearestPairs([stop("A", 1.0), stop("B", 1.0001)], [{ id: "n1", pos: [49, 1.00012] }], 30);
