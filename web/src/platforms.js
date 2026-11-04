@@ -341,7 +341,7 @@ const PHYSICAL_TAGS = new Set(["public_transport", "highway", "bus", "trolleybus
 export function stopTags(stop, stopId, network, mode = "bus") {
   const vehicle = VEHICLE[mode] || "bus";
   const tags = { public_transport: "platform", highway: "bus_stop", [vehicle]: "yes", ...(mode === "coach" ? { coach: "yes" } : {}),
-    name: stop.stop_name, ...network, [feedKey("gtfs:stop_id")]: stopId, [feedKey("gtfs:stop_name")]: stop.stop_name };
+    name: stop.stop_name, ...network, [feedKey("gtfs:stop_id")]: stopId };
   if (stop.stop_code) tags[feedKey("gtfs:stop_code")] = stop.stop_code;
   for (const t of settings.stop_ref_tags) tags[t] = stopId;
   const ref = stopRef(stop, stopId);
@@ -626,6 +626,12 @@ export function enrich(obj, key, tags, sizes = null, ofStop = new Map()) {
   nameNumberedRefs(t, key);
   nameNumberedNetworkTags(t);
   tidyStopKeys(t, ofStop);
+  const stopNameKey = feedKey("gtfs:stop_name");
+  if (t[stopNameKey]) {
+    const names = t[stopNameKey].split(";").map((v) => v.trim()).filter((v) => v !== tags.name);
+    if (names.length) t[stopNameKey] = names.join(";");
+    else delete t[stopNameKey];
+  }
   let suffix = "", n = 1;
   while ((t[`network${suffix}`] ?? tags.network) !== tags.network) suffix = `:${++n}`;
   const incoming = tags.network;

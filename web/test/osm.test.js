@@ -53,6 +53,12 @@ test("feedTags names network-specific tags", () => {
 
 test("feedTags", () => {
   configure();
-  const t = feedTags({ route_ref: "10;2" }, { stop_id: "S", stop_name: "Gare", route_ref: new Set(["3"]), wheelchair_boarding: "1" }, "F");
-  assert.deepEqual(t, { route_ref: "2;3;10", "gtfs:stop_id:F": "S", "gtfs:stop_name:F": "Gare", bus: "yes", wheelchair: "yes" });
+  const t = feedTags({ name: "Gare", route_ref: "10;2" }, { stop_id: "S", stop_name: "Gare", route_ref: new Set(["3"]), wheelchair_boarding: "1" }, "F");
+  assert.deepEqual(t, { name: "Gare", route_ref: "2;3;10", "gtfs:stop_id:F": "S", bus: "yes", wheelchair: "yes" });
+});
+
+test("feedTags keeps the GTFS stop name when it differs from the OSM name", () => {
+  configure();
+  const t = feedTags({ name: "Gare historique" }, { stop_id: "S", stop_name: "Gare", route_ref: new Set(), wheelchair_boarding: "" }, "F");
+  assert.equal(t["gtfs:stop_name:F"], "Gare");
 });

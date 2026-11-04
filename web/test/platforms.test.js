@@ -344,7 +344,19 @@ test("platform tags: the vehicle PTNA looks for, GTFS keys with the feed code", 
   assert.equal(stopTags(stop, "S1", {}).highway, "bus_stop");
   settings.feed = "FR-X";
   const t = stopTags(stop, "S1", {});
-  assert.deepEqual([t["gtfs:stop_id:FR-X"], t["gtfs:stop_name:FR-X"], t["gtfs:stop_code:FR-X"], t["gtfs:stop_id"]], ["S1", "Gare", "12A", undefined]);
+  assert.deepEqual([t["gtfs:stop_id:FR-X"], t["gtfs:stop_name:FR-X"], t["gtfs:stop_code:FR-X"], t["gtfs:stop_id"]], ["S1", undefined, "12A", undefined]);
+});
+
+test("enrich removes a GTFS stop name only when it duplicates name", () => {
+  settings.feed = "FR-X";
+  const obj = new Store({
+    same: node(49, 1, { name: "Gare", "gtfs:stop_name:FR-X": "Gare" }),
+    different: node(49, 1, { name: "Gare", "gtfs:stop_name:FR-X": "Gare historique;Gare" }),
+  });
+  enrich(obj, "same", { name: "Gare", "gtfs:stop_id:FR-X": "S1" });
+  enrich(obj, "different", { name: "Gare", "gtfs:stop_id:FR-X": "S2" });
+  assert.equal(obj.get("same").tags["gtfs:stop_name:FR-X"], undefined);
+  assert.equal(obj.get("different").tags["gtfs:stop_name:FR-X"], "Gare historique");
 });
 
 test("a platform drawn as a way never gets highway=bus_stop", () => {

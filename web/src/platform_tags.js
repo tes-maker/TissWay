@@ -54,7 +54,10 @@ export function feedTags(tags, stop, feedId, network = tags.network) {
   nameNumberedRefs(t, stop.stop_id);
   nameNumberedNetworkTags(t);
   addStopValue(t, `gtfs:stop_id${suffix}`, stop.stop_id);
-  addStopValue(t, `gtfs:stop_name${suffix}`, stop.stop_name);
+  const stopNames = (t[`gtfs:stop_name${suffix}`] ?? "").split(";").map((v) => v.trim()).filter((v) => v && v !== t.name);
+  if (stopNames.length) t[`gtfs:stop_name${suffix}`] = stopNames.join(";");
+  else delete t[`gtfs:stop_name${suffix}`];
+  if (stop.stop_name !== t.name) addStopValue(t, `gtfs:stop_name${suffix}`, stop.stop_name);
   if (stop.stop_code) {
     const key = `gtfs:stop_code${suffix}`;
     addStopValue(t, t.network && network !== t.network ? networkKeyFor(key, network) : key, stop.stop_code);
