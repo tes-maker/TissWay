@@ -177,7 +177,7 @@ export async function splitWays(obj, parentRelations = readParents) {
   }
   const none = new Map();
   for (const k of routes) obj.set(k, { ...obj.get(k), members: rewriteMembers(obj.get(k), splits, routePassages.get(k)) });
-  for (const [k, rel] of existing) obj.set(k, { ...rel, members: rewriteMembers(rel, splits, routePassages.get(k) ?? none) });
+  for (const [k, rel] of existing) obj.update(k, rel, { ...rel, members: rewriteMembers(rel, splits, routePassages.get(k) ?? none) });
 
   return [splits.size, [...splits.values()].filter((s) => s.closed).length, existing.length];
 }

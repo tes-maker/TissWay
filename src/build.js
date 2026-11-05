@@ -191,7 +191,7 @@ class LineBuilder {
       if (paired.has(i)) {
         const key = paired.get(i);
         this.noteOperator(key, existing.routes[key], common.operator);
-        obj.set(key, { ...updatedRelation(existing.routes[key], members, tags), ...(variants[i].complete ? { complete: true } : {}) });
+        obj.update(key, existing.routes[key], { ...updatedRelation(existing.routes[key], members, tags), ...(variants[i].complete ? { complete: true } : {}) });
         this.updated.push(key);
         return key;
       }
@@ -201,7 +201,7 @@ class LineBuilder {
     });
     const used = new Set(paired.values());
     this.unpaired = candidates.filter((k) => !used.has(k));
-    for (const k of this.unpaired) if (existing.routes[k].correctedIds) obj.set(k, existing.routes[k]);
+    for (const k of this.unpaired) if (existing.routes[k].correctedIds) obj.update(k, existing.routes[k], existing.routes[k]);
     if (existing) this.elsewhere = existing.otherNetworks(mode, ref, network.network, drafts);
 
     const masterTags = { type: "route_master", route_master: mode, ...(ref ? { ref } : {}), name: routeName(mode, ref, masterLabel(endpoints)), ...common };
@@ -209,7 +209,7 @@ class LineBuilder {
     if (master) {
       masterTags[feedKey("gtfs:route_id")] = existing.masterRouteIds(existing.masters[master], route.route_id);
       this.noteOperator(master, existing.masters[master], common.operator);
-      obj.set(master, updatedMaster(existing.masters[master], routeKeys, masterTags));
+      obj.update(master, existing.masters[master], updatedMaster(existing.masters[master], routeKeys, masterTags));
       this.updated.push(master);
       this.shareOperator([master, ...routeKeys]);
     } else {
