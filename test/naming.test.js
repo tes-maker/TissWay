@@ -29,13 +29,13 @@ for (const [town, name, label] of [
   ["Les Damps", "Clinique Les Damps", "LES DAMPS Clinique"],
   ["Mondeville", "Hauts de Mondeville", "Hauts de Mondeville"], // it cannot be taken out
   ["Le Mont-Saint-Michel", "Mont-Saint-Michel", "Mont-Saint-Michel"],
-  ["Saint-Manvieu-Norrey", "Norrey Calvaire", "Norrey Calvaire"],
-  ["Colomby-Anguerny", "Anguerny - Coursanne", "Anguerny - Coursanne"],
-  ["Feuguerolles-Bully", "Bully", "Bully"],
+  ["Saint-Manvieu-Norrey", "Norrey Calvaire", "SAINT-MANVIEU-NORREY Norrey Calvaire"],
+  ["Colomby-Anguerny", "Anguerny - Coursanne", "COLOMBY-ANGUERNY Anguerny - Coursanne"],
+  ["Feuguerolles-Bully", "Bully", "FEUGUEROLLES-BULLY Bully"],
   ["Carentan-les-Marais", "Carentan", "CARENTAN-LES-MARAIS"],
-  ["Cherbourg-en-Cotentin", "CHERBOURG-GARE", "CHERBOURG-GARE"],
-  ["Saint-Pierre-en-Auge", "Saint-Pierre-sur-Dives", "Saint-Pierre-sur-Dives"],
-  ["Saint-Aubin-lès-Elbeuf", "Elbeuf - Saint-Aubin", "Elbeuf - Saint-Aubin"],
+  ["Cherbourg-en-Cotentin", "CHERBOURG-GARE", "CHERBOURG-EN-COTENTIN CHERBOURG-GARE"],
+  ["Saint-Pierre-en-Auge", "Saint-Pierre-sur-Dives", "SAINT-PIERRE-EN-AUGE Saint-Pierre-sur-Dives"],
+  ["Saint-Aubin-lès-Elbeuf", "Elbeuf - Saint-Aubin", "SAINT-AUBIN-LES-ELBEUF Elbeuf - Saint-Aubin"],
   // another place in capitals: a former commune, or just over the boundary
   ["Hérouville-Saint-Clair", "CAEN Chemin Vert", "CAEN Chemin Vert"],
   ["Ifs", "ARGENTAN - Musiciens (Arrêt urbain)", "ARGENTAN Musiciens (Arrêt urbain)"],
@@ -79,7 +79,7 @@ for (const [places, given, name, official] of [
   // only the town, or a town that cannot be taken out: official_name would say nothing more
   ["Caen", "Caen", "Caen", undefined],
   ["Mondeville", "Hauts de Mondeville", "Hauts de Mondeville", undefined],
-  ["Saint-Manvieu-Norrey", "Norrey Calvaire", "Norrey Calvaire", undefined],
+  ["Saint-Manvieu-Norrey", "Norrey Calvaire", "Norrey Calvaire", "SAINT-MANVIEU-NORREY - Norrey Calvaire"],
   [[], "Gare", "Gare", undefined],
 ]) {
   test(`stopNames: ${given} in ${places}`, async () => {
@@ -96,6 +96,31 @@ test("stopNames: capitals are taken out only when they name a place", async () =
   assert.deepEqual(await naming.stopNames("Saint-Pierre-en-Auge", "MEZIDON-CANON: college", isPlace), { name: "college", official_name: "MEZIDON-CANON - college" });
   assert.deepEqual(await naming.stopNames("Caen", "CHU Côte de Nacre", isPlace), { name: "CHU Côte de Nacre" });
   assert.deepEqual(await naming.stopNames("Hérouville-Saint-Clair", "CAEN Chemin Vert"), { name: "CAEN Chemin Vert" }); // nothing confirmed
+});
+
+test("stopNames in a commune nouvelle: its name first, the former commune stays in the name of the stop", async () => {
+  const delegated = async (place, commune) => ({ BROUAY: "Thue et Mue", "MEZIDON-CANON": "Mézidon Vallée d'Auge" })[place] === commune;
+  const near = async (place) => ["CAEN", "BROUAY", "MEZIDON-CANON"].includes(place);
+  const check = async (town, name, stop, official) => assert.deepEqual(await naming.stopNames(town, name, near, delegated), official ? { name: stop, official_name: official } : { name: stop });
+  await check("Thue et Mue", "Brouay Mairie", "Brouay Mairie", "THUE ET MUE - Brouay Mairie");
+  await check("Thue et Mue", "THUE ET MUE - Brouay Mairie", "Brouay Mairie", "THUE ET MUE - Brouay Mairie"); // run again
+  await check("Thue et Mue", "Bretteville-l'Orgueilleuse Gare", "Bretteville-l'Orgueilleuse Gare", "THUE ET MUE - Bretteville-l'Orgueilleuse Gare");
+  await check("Thue et Mue", "Mairie", "Mairie", "THUE ET MUE - Mairie");
+  await check("Thue et Mue", "BROUAY Mairie", "BROUAY Mairie", "THUE ET MUE - BROUAY Mairie");
+  await check("Thue et Mue", "BROUAY - Mairie", "BROUAY Mairie", "THUE ET MUE - BROUAY Mairie");
+  await check("Thue et Mue", "Thue et Mue - Brouay Mairie", "Brouay Mairie", "THUE ET MUE - Brouay Mairie");
+  await check("Mézidon Vallée d'Auge", "MEZIDON-CANON - college", "MEZIDON-CANON college", "MEZIDON VALLEE D'AUGE - MEZIDON-CANON college");
+  await check("Saint-Pierre-en-Auge", "Saint-Pierre-sur-Dives Mairie", "Saint-Pierre-sur-Dives Mairie", "SAINT-PIERRE-EN-AUGE - Saint-Pierre-sur-Dives Mairie");
+  await check("Saint-Manvieu-Norrey", "Norrey Calvaire", "Norrey Calvaire", "SAINT-MANVIEU-NORREY - Norrey Calvaire");
+  await check("Condé-en-Normandie", "Condé-sur-Noireau Hôpital", "Condé-sur-Noireau Hôpital", "CONDE-EN-NORMANDIE - Condé-sur-Noireau Hôpital");
+  await check("Hérouville-Saint-Clair", "CAEN Chemin Vert", "Chemin Vert", "CAEN - Chemin Vert"); // another town, not a former commune of this one
+  await check("Mondeville", "Hauts de Mondeville", "Hauts de Mondeville");
+});
+
+test("routeLabel in a commune nouvelle: the titles follow", () => {
+  assert.equal(naming.routeLabel("Thue et Mue", "THUE ET MUE - Brouay Mairie"), "THUE ET MUE Brouay Mairie");
+  assert.equal(naming.routeLabel("Thue et Mue", "Brouay Mairie"), "THUE ET MUE Brouay Mairie");
+  assert.equal(naming.routeLabel("Mézidon Vallée d'Auge", "MEZIDON VALLEE D'AUGE - MEZIDON-CANON college"), "MEZIDON VALLEE D'AUGE MEZIDON-CANON college");
 });
 
 test("stopKey: a stop is the same with or without the place before it", () => {

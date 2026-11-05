@@ -10,6 +10,8 @@ import { log } from "./util.js";
 const WIKIDATA_API = "https://www.wikidata.org/w/api.php";
 const WIKIDATA_SPARQL = "https://query.wikidata.org/sparql";
 const PUBLIC_TRANSPORT = "wd:Q178512"; // what a network must be an instance of, directly or not
+const GEO_API = "https://geo.api.gouv.fr"; // French administrative divisions: the communes déléguées of a commune nouvelle
+const SETTLEMENTS = new Set(["city", "town", "village", "municipality", "city_district"]); // what a stop name can name, not a hamlet ("La Gare") or a building
 const PLACE_REACH = 0.3; // degrees around a stop where a place named in its name can be
 const BATCH = 25; // words per Wiktionary query (two titles each, the API takes 50)
 const isAscii = (s) => /^[\x00-\x7f]*$/.test(s);
@@ -44,17 +46,34 @@ export const lookup = {
     return soft("Nominatim", {}, async () => (await cachedJson(`${settings.services.nominatim_url}/reverse?${params}`, lookupDelay())).address || {});
   },
 
-  /** Every name of the place at a position, most precise first: a stop may use any of them. */
+  /** Every name of the place at a position, most precise first: a stop may use any of them. In France only the commune: a commune nouvelle rather than the commune déléguée
+   * or the village in it (Thue et Mue, not Brouay), and not municipality, which is the arrondissement there (Caen for all of these) unless nothing else is known. */
   async placesAt(lat, lon, lang) {
     const a = await lookup.reverse(lat, lon, lang);
-    return [...new Set([a.village, a.town, a.city, a.municipality].filter(Boolean))];
+    if (a.country_code !== "fr") return [...new Set([a.village, a.town, a.city, a.municipality].filter(Boolean))];
+    return [a.city ?? a.town ?? a.village ?? a.municipality].filter(Boolean);
   },
 
-  /** Is there a town or a village of this name around a position? Unknown counts as no. */
+  /** Is this name officially a commune déléguée or associée of this commune (Découpage administratif API)? Unknown counts as no. */
+  isDelegated(name, commune) {
+    const params = new URLSearchParams({ nom: name, fields: "nom,type,chefLieu", limit: 5 });
+    return soft("Découpage administratif", false, async () => {
+      for (const part of await cachedJson(`${GEO_API}/communes_associees_deleguees?${params}`)) {
+        if (nameKey(part.nom) !== nameKey(name) || !part.chefLieu) continue;
+        const parent = await cachedJson(`${GEO_API}/communes/${part.chefLieu}?fields=nom`);
+        if (nameKey(parent.nom) === nameKey(commune)) return true;
+      }
+      return false;
+    });
+  },
+
+  /** Is there a town or a village of exactly this name around a position, "St" read as "Saint"? Unknown counts as no. */
   placeNear(name, lat, lon) {
     const viewbox = [lon - PLACE_REACH, lat + PLACE_REACH, lon + PLACE_REACH, lat - PLACE_REACH].map((v) => v.toFixed(1)).join(",");
-    const params = new URLSearchParams({ format: "jsonv2", q: name, featureType: "settlement", limit: 1, bounded: 1, viewbox });
-    return soft("Nominatim", false, async () => (await cachedJson(`${settings.services.nominatim_url}/search?${params}`, lookupDelay())).length > 0);
+    const params = new URLSearchParams({ format: "jsonv2", q: name, featureType: "settlement", limit: 3, bounded: 1, viewbox });
+    const key = (text) => nameKey(text).replace(/\bst\b/g, "saint").replace(/\bste\b/g, "sainte");
+    return soft("Nominatim", false, async () => (await cachedJson(`${settings.services.nominatim_url}/search?${params}`, lookupDelay()))
+      .some((place) => key(place.name ?? "") === key(name) && SETTLEMENTS.has(place.addresstype)));
   },
 
   /** ISO code ("fr") of the country at a position, null if unknown. */

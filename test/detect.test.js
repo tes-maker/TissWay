@@ -148,8 +148,68 @@ test("a service failing is reported and the run goes on; cancelling is not swall
 
 test("placesAt: most precise first, each once", async () => {
   answers = () => json({ address: { village: "V", city: "C", municipality: "C", country_code: "fr" } });
-  assert.deepEqual(await lookup.placesAt(49, 1), ["V", "C"]);
+  assert.deepEqual(await lookup.placesAt(49, 1), ["C"]);
   assert.equal(await lookup.countryAt(49, 1), "fr");
 });
 
 test("the settings are read when called", () => assert.equal(settings.services, services));
+
+// --- communes nouvelles
+
+const GEO = {
+  "MEZIDON-CANON": [{ nom: "Mézidon-Canon", type: "commune-deleguee", chefLieu: "14431" }],
+  "Paris 13e Arrondissement": [],
+  "Vire": [{ nom: "Vire", type: "commune-deleguee", chefLieu: "14762" }, { nom: "Virey", type: "commune-deleguee", chefLieu: "50484" }],
+  "Tourlaville": [{ nom: "Tourlaville", type: "commune-deleguee", chefLieu: "50129" }],
+};
+const PARENTS = { 14431: "Mézidon Vallée d'Auge", 14762: "Vire Normandie", 50129: "Cherbourg-en-Cotentin" };
+function france() {
+  answers = (url) => {
+    const u = new URL(url);
+    if (u.pathname.endsWith("/communes_associees_deleguees")) return json(GEO[u.searchParams.get("nom")] ?? []);
+    return json({ nom: PARENTS[u.pathname.split("/").pop()] });
+  };
+}
+
+for (const [what, address, places] of [
+  ["a commune déléguée in city_district: the commune nouvelle", { city_district: "Mézidon-Canon", city: "Mézidon Vallée d'Auge", municipality: "Lisieux" }, ["Mézidon Vallée d'Auge"]],
+  ["with town as the commune", { city_district: "Tourlaville", town: "Cherbourg-en-Cotentin", municipality: "Cherbourg" }, ["Cherbourg-en-Cotentin"]],
+  ["a village in a commune nouvelle", { village: "Brouay", city: "Thue et Mue", municipality: "Caen" }, ["Thue et Mue"]],
+  ["never the arrondissement", { village: "Cairon", municipality: "Caen" }, ["Cairon"]],
+  ["a district of a town", { suburb: "Paris 13e Arrondissement", city_district: "Paris", city: "Paris" }, ["Paris"]],
+  ["only a municipality", { municipality: "Quelque Part" }, ["Quelque Part"]],
+]) {
+  test(`placesAt in France: ${what}`, async () => {
+    answers = () => json({ address: { ...address, country_code: "fr" } });
+    assert.deepEqual(await lookup.placesAt(49.1, 1.1), places);
+  });
+}
+
+test("placesAt elsewhere: every name, municipality kept", async () => {
+  answers = () => json({ address: { city_district: "Mitte", city: "Berlin", municipality: "M", country_code: "de" } });
+  assert.deepEqual(await lookup.placesAt(52.5, 13.4), ["Berlin", "M"]);
+});
+
+test("isDelegated: an exact name, of this commune; the API failing counts as no", async () => {
+  france();
+  assert.equal(await lookup.isDelegated("MEZIDON-CANON", "Mézidon Vallée d'Auge"), true);
+  assert.equal(await lookup.isDelegated("Vire", "Caen"), false);
+  assert.equal(await lookup.isDelegated("Paris 13e Arrondissement", "Paris"), false);
+  clearCaches();
+  answers = () => new Response("{}", { status: 400 });
+  assert.equal(await lookup.isDelegated("Tourlaville", "Cherbourg-en-Cotentin"), false);
+});
+
+for (const [name, found, yes] of [
+  ["MEZIDON-CANON", [{ name: "Mézidon-Canon", addresstype: "city_district" }], true],
+  ["ST PIERRE SUR DIVES", [{ name: "Saint-Pierre-sur-Dives", addresstype: "village" }], true],
+  ["GARE", [{ name: "La Gare", addresstype: "hamlet" }], false],
+  ["Mairie", [{ name: "Mairie d'Anisy", addresstype: "amenity" }], false],
+  ["La Gare", [{ name: "La Gare", addresstype: "hamlet" }], false],
+  ["CHU", [], false],
+]) {
+  test(`placeNear: ${name}`, async () => {
+    answers = () => json(found);
+    assert.equal(await lookup.placeNear(name, 49, 1), yes);
+  });
+}

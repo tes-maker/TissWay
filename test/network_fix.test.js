@@ -33,7 +33,8 @@ beforeEach(() => {
       asked.reverse++;
       return json({ address: { town: towns(Number(new URL(u).searchParams.get("lat"))) } });
     }
-    if (u.includes("/search?")) return json(answer.places.includes(new URL(u).searchParams.get("q")) ? [{ lat: 49, lon: 1 }] : []);
+    if (u.includes("geo.api")) return json([]);
+    if (u.includes("/search?")) return json(answer.places.includes(new URL(u).searchParams.get("q")) ? [{ name: new URL(u).searchParams.get("q"), addresstype: "city" }] : []);
     if (u.includes("overpass")) {
       const q = decodeURIComponent(init.body.slice(5));
       if (q.includes("route_master")) return json({ elements: answer.relations });

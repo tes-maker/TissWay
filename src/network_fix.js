@@ -68,7 +68,7 @@ async function nameAll(objects, lang, onProgress) {
       found = { pos, places: await lookup.placesAt(pos[0], pos[1], lang) };
       seen.set(stopKey(name), [...nearby, found]);
     }
-    const names = await stopNames(found.places, official ?? name, (place) => lookup.placeNear(place, pos[0], pos[1]));
+    const names = await stopNames(found.places, official ?? name, (place) => lookup.placeNear(place, pos[0], pos[1]), lookup.isDelegated);
     out.set(key, { ...names, places: found.places });
   }
   return out;
