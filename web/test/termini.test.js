@@ -60,12 +60,12 @@ beforeEach(() => {
 afterEach(() => { globalThis.fetch = realFetch; configure(); });
 
 /** A line with these stops [id, name, position along the road], travelled northwards. */
-async function line(stops) {
+async function line(stops, others = []) {
   const zip = {
     "agency.txt": "agency_id,agency_name\nAG,Bustown\n",
     "routes.txt": "route_id,agency_id,route_short_name,route_type\nR1,AG,1,3\n",
     "trips.txt": "route_id,service_id,trip_id,shape_id\nR1,S,t1,sh1\n",
-    "stops.txt": `stop_id,stop_name,stop_lat,stop_lon\n${stops.map(([id, name, at]) => `${id},${name},${LAT(at)},1.00015`).join("\n")}\n`,
+    "stops.txt": `stop_id,stop_name,stop_lat,stop_lon\n${[...stops, ...others].map(([id, name, at, lon = 1.00015]) => `${id},${name},${LAT(at)},${lon}`).join("\n")}\n`,
     "stop_times.txt": `trip_id,stop_id,stop_sequence\n${stops.map(([id], i) => `t1,${id},${i + 1}`).join("\n")}\n`,
     "shapes.txt": `shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\n${stops.map(([, , at], i) => `sh1,${LAT(at)},1,${i + 1}`).join("\n")}\n`,
   };
@@ -271,3 +271,34 @@ test("a relation of the line with nothing to correct and no variant stays out of
   assert.ok(!xml.includes('<relation id="31"'));
 });
 
+function closerToTheStopAcross() {
+  correctLine();
+  world.elements = [stopPosition(0), node(1), node(2), stopPosition(3), stopPosition(4), way(1, [0, 1, 2]), way(2, [2, 3, 4])];
+  world.relations[0].members = world.relations[0].members.map((m) => (m.ref === 2 && m.role === "stop" ? { ...m, ref: 3 } : m));
+}
+const ACROSS = [["D", "Delta", 2.7, 0.99985]]; // across the road, next to n3
+
+test("a good relation whose stop_position is closer to the stop across: the stop gets its own, the trace stays", async () => {
+  closerToTheStopAcross();
+  const { summary, stops, created, ways } = await line(ABC, ACROSS);
+  assert.equal(summary["complete relations"], 0);
+  assert.equal(world.valhalla, 0);
+  assert.equal(created.length, 1);
+  assert.equal(stops[1], created[0]);
+  assert.deepEqual(ways, ["w1", "w2"]);
+});
+
+test("the toggle off: that stop_position stays, the relation is complete", async () => {
+  closerToTheStopAcross();
+  settings.stop_position_own = false;
+  const { summary, stops, created } = await line(ABC, ACROSS);
+  assert.equal(summary["complete relations"], 1);
+  assert.equal(stops[1], "n3");
+  assert.deepEqual(created, []);
+});
+
+test("a complete relation with a stop across, each stop_position being nearer its own: still complete", async () => {
+  correctLine();
+  const { summary } = await line(ABC, [["D", "Delta", 3, 0.99985]]);
+  assert.equal(summary["complete relations"], 1);
+});

@@ -58,6 +58,8 @@ coordinates are often tens of metres off), else at the projection of the GTFS st
   of the same name (or the opposite platform) across the road, it is left to that stop and a new
   stop_position is created closer on the way, in front of our stop. Otherwise both directions would stop
   at the same spot;
+- **checked for every stop, even on a good trace** (`stop_position_own`, on by default): compared along the road, a stop_position closer to the stop across the road than to
+  this stop, by more than 2 m, is left to that stop and this one gets its own. The trace is kept. Off: only the rule above applies;
 - stops facing each other (projections within `stop_position_shared_m`) share one stop_position, and
   same-name stops on the same kerb are treated as one platform (aggregated feeds list the same platform
   under several networks);
@@ -91,7 +93,7 @@ lines converted go in the file corrected, even a relation of the line that no va
   Beyond the usual reach, it must have the name of the stop or none, and be closer to this stop than to the next one. Otherwise a new one is created.
 - The trace stops exactly at these stop_positions: ways before the first or after the last are left out, and a way partly travelled is cut there.
 - A relation with nothing left to do keeps its trace as it is: same ways, none split for it, same stop_positions and platforms. It needs a stop_position and a
-  platform for each GTFS stop, in order, each platform being one of the stop's and on the kerb side, and a trace ending exactly at its first and last
+  platform for each GTFS stop, in order, each platform being one of the stop's and on the kerb side, each stop_position not closer to the stop across the road, and a trace ending exactly at its first and last
   stop_positions. Its tags are still completed. A way another line must split is still replaced by its parts.
 
 ### Platforms

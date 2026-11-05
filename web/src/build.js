@@ -123,7 +123,7 @@ class LineBuilder {
       if (!isNew(platform)) {
         const rivals = (stops.rivals.get(dataId) || []).flatMap((r) => (stops.platforms.get(r) || [])
           .filter((c) => c.id !== platform).map((c) => c.pos));
-        spot = locateStop(obj, ways, pos, { start, rivals, vehicle: this.vehicle, platform: true, terminus }) || spot;
+        spot = locateStop(obj, ways, pos, { start, rivals, vehicle: this.vehicle, platform: true, terminus, opposites: stops.opposites(dataId, platform) }) || spot;
       } else if (dataId !== stopId) {
         spot = this.locate(ways, dataId, start, terminus) || spot;
       }
