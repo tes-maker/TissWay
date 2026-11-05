@@ -289,7 +289,7 @@ test("a line tagged with an operator shares it, the GTFS agency is never used fo
 });
 
 test("the operator of the settings goes on the relations and platforms of the line, not on stop_positions, and replaces the one of the relations", async () => {
-  settings.operators = { Bustown: "Transdev" };
+  settings.operator = "Transdev";
   const { state, xml } = await runRoutes(await open(), { network: "Bustown", ref: "R1" });
   assert.equal(state.obj.get("r30").tags.operator, "Transdev");
   const objects = [...state.obj.modified.values()].filter((o) => o.tags);

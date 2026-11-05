@@ -2,7 +2,7 @@
 
 import { feedKey, joinIds, updatedMaster, updatedRelation } from "./existing.js";
 import { latlon, xy } from "./geo.js";
-import { masterLabel, modePrefix, operatorOf, routeName, tripTitle } from "./naming.js";
+import { masterLabel, modePrefix, routeName, tripTitle } from "./naming.js";
 import { isNew, newKey } from "./osm.js";
 import { linkNode } from "./splitting.js";
 import { VEHICLE, choosePlatform, completeRouteRef, fixSide, kerbSide, locateStop, makeSpot, materialize, onKerb, roadDistance, sideSegment, stopSegment } from "./platforms.js";
@@ -15,8 +15,7 @@ const HEX_COLOUR = /^#?([0-9A-Fa-f]{6})$/;
 /** Tags shared by the route relations and the route_master of a line. */
 function routeTags(route, network) {
   const tags = { ...network };
-  const operator = operatorOf(network.network);
-  if (operator) tags.operator = operator;
+  if (settings.operator) tags.operator = settings.operator;
   for (const [gtfsKey, setting, osmKey] of [["route_color", "colour", "colour"], ["route_text_color", "colour_text", "colour:text"]]) {
     const m = HEX_COLOUR.exec((settings[setting] || route[gtfsKey] || "").trim());
     if (m) tags[osmKey] = `#${m[1]}`;

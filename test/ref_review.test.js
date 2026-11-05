@@ -2,7 +2,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import "./helpers.js";
-import { operatorOf } from "../src/naming.js";
 import { Store, writeOsm } from "../src/osm.js";
 import { applyPriority, closeNames, closeNetworks, keepNetworkApart, listRefs, mergeNetworks, networksOf, priorityRows, removeRef, restoreRef, reviewRefs } from "../src/ref_review.js";
 import { settings } from "../src/settings.js";
@@ -267,40 +266,35 @@ test("the stops of a merged name count for the name kept", () => {
   assert.equal(obj.get("n1").tags["ref:Nomad"], "14CAE74A");
 });
 
-// --- operators, correlated with the ref priorities ---------------------------------------------------------
+// --- the operator of the line, correlated with the ref priorities -----------------------------------------
 
-const outputOf = (obj) => {
-  const xml = writeOsm(obj);
-  return Object.fromEntries([...xml.matchAll(/<tag k="([^"]+)" v="([^"]+)"/g)].map(([, k, v]) => [k, v]));
-};
+const outputOf = (obj) => Object.fromEntries([...writeOsm(obj).matchAll(/<tag k="([^"]+)" v="([^"]+)"/g)].map(([, k, v]) => [k, v]));
 const NEW_SHARED = { name: "Mont Coco", public_transport: "platform", network: "Twisto", "network:2": "Nomad" };
-const review2 = (tags, base = tags, more = {}) => {
+const converted = (tags, network, more = {}) => {
   settings.stop_ref_tags = [];
-  const obj = store(tags, base);
-  return [reviewRefs(obj, { sizes, ofStop, stops, ...more }), obj];
+  const obj = store(tags);
+  return [reviewRefs(obj, { sizes, ofStop, stops, network, ...more }), obj];
 };
 
-test("operator: the settings give each network its place, in the order of network", () => {
-  settings.operators = { Twisto: "RATP Dev", Nomad: "Keolis" };
-  const [, obj] = review2(NEW_SHARED);
+test("operator: the line of the first network comes first, in the order of network", () => {
+  settings.operator = "RATP Dev";
+  const [, obj] = converted(NEW_SHARED, "Twisto");
   assert.equal(obj.get("n1").tags.operator, "RATP Dev");
-  assert.equal(obj.get("n1").tags["operator:Nomad"], "Keolis");
-  const out = outputOf(obj);
-  assert.equal(out.network, "Twisto;Nomad");
-  assert.equal(out.operator, "RATP Dev;Keolis");
-  assert.ok(!("operator:Nomad" in out));
+  assert.deepEqual([outputOf(obj).network, outputOf(obj).operator], ["Twisto;Nomad", "RATP Dev"]);
 });
 
-test("operator: one already there stays with the network owning the stop, the new one comes after", () => {
-  settings.operators = { Nomad: "Keolis" };
-  const [review, obj] = review2({ ...NEW_SHARED, operator: "RATP Dev" });
-  assert.equal(outputOf(obj).operator, "RATP Dev;Keolis");
+test("operator: one already there stays with the network owning the stop, the line's comes after", () => {
+  settings.operator = "Keolis";
+  const [review, obj] = converted({ ...NEW_SHARED, operator: "RATP Dev" }, "Nomad");
+  const out = outputOf(obj);
+  assert.equal(out.operator, "RATP Dev;Keolis");
+  assert.ok(!("operator:Nomad" in out));
   assert.deepEqual(review.corrected, []);
 });
 
 test("operator: a change of priority moves the operators with the refs", () => {
-  settings.operators = { Nomad: "Keolis" };
-  const [review, obj] = review2({ ...NEW_SHARED, operator: "RATP Dev", ref: "chuo02", "ref:Nomad": "14CAE74A" });
+  settings.operator = "Keolis";
+  const [review, obj] = converted({ ...NEW_SHARED, operator: "RATP Dev", ref: "chuo02", "ref:Nomad": "14CAE74A" }, "Nomad");
   applyPriority(review, ["Nomad", "Twisto"]);
   const out = outputOf(obj);
   assert.deepEqual([out.network, out.ref, out["ref:Twisto"], out.operator], ["Nomad;Twisto", "14CAE74A", "chuo02", "Keolis;RATP Dev"]);
@@ -310,16 +304,15 @@ test("operator: a change of priority moves the operators with the refs", () => {
 
 test("operator: settings.stop_owners puts the operators in its order, an existing one moves to its network", () => {
   settings.stop_owners = ["Nomad", "Twisto"];
-  settings.operators = { Nomad: "Keolis" };
-  const [, obj] = review2({ ...NEW_SHARED, operator: "RATP Dev", ref: "chuo02" });
+  settings.operator = "Keolis";
+  const [, obj] = converted({ ...NEW_SHARED, operator: "RATP Dev", ref: "chuo02" }, "Nomad");
   assert.equal(obj.get("n1").tags.network, "Nomad");
   assert.equal(obj.get("n1").tags["operator:Twisto"], "RATP Dev");
   assert.equal(outputOf(obj).operator, "Keolis;RATP Dev");
 });
 
 test("operator: a list read from OSM goes back to its networks, whichever comes first", () => {
-  const read = { name: "Mont Coco", public_transport: "platform", network: "Twisto;Nomad", operator: "RATP Dev;Keolis" };
-  const [review, obj] = review2({ ...read });
+  const [review, obj] = converted({ name: "Mont Coco", public_transport: "platform", network: "Twisto;Nomad", operator: "RATP Dev;Keolis" }, "Twisto");
   assert.equal(obj.get("n1").tags.operator, "RATP Dev");
   assert.equal(obj.get("n1").tags["operator:Nomad"], "Keolis");
   assert.deepEqual(review.corrected, []);
@@ -328,30 +321,25 @@ test("operator: a list read from OSM goes back to its networks, whichever comes 
 });
 
 test("operator: a different one of the same network is replaced and reported, the same one is not", () => {
-  settings.operators = { Twisto: "RATP Dev" };
-  const [review, obj] = review2({ ...NEW_SHARED, network: "Twisto", operator: "Keolis" });
+  settings.operator = "RATP Dev";
+  const [review, obj] = converted({ ...NEW_SHARED, operator: "Keolis" }, "Twisto");
   assert.equal(outputOf(obj).operator, "RATP Dev");
   assert.match(review.corrected[0], /Mont Coco.*operator Keolis replaced by RATP Dev/);
-  assert.deepEqual(review2({ ...NEW_SHARED, operator: "RATP Dev" })[0].corrected, []);
+  assert.deepEqual(converted({ ...NEW_SHARED, operator: "RATP Dev" }, "Twisto")[0].corrected, []);
 });
 
-test("operator: two networks with one operator write it once; without the setting nothing changes", () => {
-  settings.operators = { Twisto: "Keolis", Nomad: "Keolis" };
-  assert.equal(outputOf(review2(NEW_SHARED)[1]).operator, "Keolis");
-  settings.operators = {};
-  const [review, obj] = review2({ ...NEW_SHARED, operator: "RATP Dev" });
+test("operator: the other network keeps its own, a platform without the network of the line is left, nothing without the setting", () => {
+  settings.operator = "Keolis";
+  assert.equal(outputOf(converted({ ...NEW_SHARED, operator: "RATP Dev;Transdev", network: "Twisto;Nomad", "network:2": undefined }, "Nomad")[1]).operator, "RATP Dev;Keolis");
+  assert.equal(outputOf(converted({ name: "A", public_transport: "platform", network: "Twisto", operator: "RATP Dev" }, "Nomad")[1]).operator, "RATP Dev");
+  settings.operator = "";
+  const [review, obj] = converted({ ...NEW_SHARED, operator: "RATP Dev" }, "Nomad");
   assert.equal(outputOf(obj).operator, "RATP Dev");
   assert.deepEqual(review.corrected, []);
-  assert.equal(outputOf(review2({ name: "A", public_transport: "platform", network: "Twisto" })[1]).operator, undefined);
 });
 
-test("operator: the setting may name the network longer or shorter than OSM, not when it is ambiguous", () => {
-  settings.operators = { "Nomad Car": "Keolis" };
-  assert.equal(operatorOf("Nomad"), "Keolis");
-  settings.operators = { Nomad: "Keolis" };
-  assert.equal(operatorOf("nomad car"), "Keolis");
-  assert.equal(operatorOf("Twisto"), "");
-  settings.operators = { "Nomad Car": "Keolis", "Nomad Train": "SNCF" };
-  assert.equal(operatorOf("Nomad"), "");
-  assert.equal(operatorOf("Nomad Train"), "SNCF");
+test("operator: a merged network name takes it under the name kept", () => {
+  settings.operator = "Keolis";
+  settings.network_merges = { "Nomad Car": "Nomad" };
+  assert.equal(outputOf(converted({ ...NEW_SHARED, operator: "RATP Dev" }, "Nomad Car")[1]).operator, "RATP Dev;Keolis");
 });

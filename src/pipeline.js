@@ -347,7 +347,7 @@ export async function runRoutes(feed, { network = null, ref = null, onProgress =
   const n = completeWikis(obj, networks);
   if (n) log.info(`network:wikidata / network:wikipedia completed on ${n} relation(s) / platform(s)`);
   await completeWayNodes(obj);
-  const review = reviewRefs(obj, { ...owners, stops: await feed.stops(), feed: activeFeed() });
+  const review = reviewRefs(obj, { ...owners, stops: await feed.stops(), feed: activeFeed(), network: lines[0][0] && (networks[lines[0][0].agency_id]?.network ?? (lines[0][0].agency_id || "GTFS")) });
 
   const summary = { lines: lines.length, variants: variants.length, stops: used.length, "kept traces": variants.filter((v) => v.kept_from).length, "complete relations": variants.filter((v) => v.complete).length };
   return { xml: writeOsm(obj), review, filename: outputName(network, routes), detected, summary, state: { routes, trips, stops, lines, obj, networks, assignments } };
