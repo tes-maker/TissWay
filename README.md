@@ -187,8 +187,8 @@ The network tags are `network`, `network:wikidata` and `network:wikipedia`, foun
 Wikidata when a single entry is confirmed. On a platform shared with another network, they get the same number as `network`
 (`network:2`, `network:wikidata:2`…). `ref` is the one of the network owning the stop, the others use `ref:<network>` (`ref:Nomad`).
 
-`operator` never comes from the GTFS: its agency is often not the real operator (often a subcontractor). It comes from the "Operator of each
-network" setting, else from relations of the line already in OSM. On a platform shared with another network, operators follow the ref
+`operator` never comes from the GTFS: its agency is often not the real operator (often a subcontractor). It comes from the "Operator of the
+line" setting, else from relations of the line already in OSM. On a platform shared with another network, operators follow the ref
 priorities: `network=Twisto;Nomad`, `operator=RATP Dev Caen la mer;Keolis`.
 
 ## Review in JOSM

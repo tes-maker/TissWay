@@ -74,9 +74,9 @@ and GTFS keys, and `test/pipeline.test.js` runs them on generated relations.
   window before the download asks if they are one network. Yes: platforms and relations go under the shortest name, with the refs and metadata of the other
   in its place; two different refs are left as they are and reported. Nothing is merged without this answer, which is kept in the "Merged network names" setting.
 - **stop_position**: `public_transport=stop_position`, `bus=yes`, on the way.
-- **PTNA list**: `operator` stays empty unless you give one, here or in the "Operator of each network" setting, since PTNA compares it with the OSM relations.
-- **operator**: never taken from the GTFS (its agency is often not the real operator). The "Operator of each network" setting puts it on the relations of the line and on the platforms, not on
-  stop_positions, and replaces what that network had, as listed in the window before the download. On a shared stop, operators follow the ref priorities: `network=Twisto;Nomad`,
+- **PTNA list**: `operator` stays empty unless you give one, since PTNA compares it with the OSM relations.
+- **operator**: never taken from the GTFS (its agency is often not the real operator). The "Operator of the line" setting puts it on the relations of the line converted and on its platforms, not on
+  stop_positions, and replaces what the network of the line had, as listed in the window before the download. On a shared stop, operators follow the ref priorities: `network=Twisto;Nomad`,
   `operator=RATP Dev Caen la mer;Keolis`. An operator already mapped belongs to the network owning the stop, and moves with it when the order changes. Without the setting, a line shares the operator its mapped relations agree on.
 
 **Left out on purpose:** `interval` and `opening_hours` need a calendar reading that could be wrong; `gtfs:release_date` is not given reliably by feeds.
