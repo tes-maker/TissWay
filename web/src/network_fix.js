@@ -12,7 +12,7 @@ import { Store, changesOsm, completeWayNodes, differsFromOsm, onRoad, readObject
 import { selectRoutes } from "./pipeline.js";
 import { networkStops } from "./platform_tags.js";
 import { chooseVias } from "./via.js";
-import { VEHICLE, dropBusTag, nameNumberedNetworkTags, nameNumberedRefs, stopPositionOnly, takeFromStopPosition } from "./platforms.js";
+import { VEHICLE, nameNumberedNetworkTags, nameNumberedRefs, stopPositionOnly, takeFromStopPosition } from "./platforms.js";
 import { settings } from "./settings.js";
 import { dedupe, listIn, log } from "./util.js";
 
@@ -35,12 +35,12 @@ export function prefixOf(tags, mode, fallback = null) {
   return own || fallback || set || usual;
 }
 
-/** Tags of a platform corrected. names: its names, if it has any. road: of a line on the road, highway=platform for a way, bus_stop for a node. */
-function correctedPlatform(tags, names, { road, way }) {
+/** Tags of a platform corrected. names: its names, if it has any. road: of a line on the road, highway=platform for a way, bus_stop for a node. bus: of a bus or coach line, bus=yes unless it says otherwise. */
+function correctedPlatform(tags, names, { road, way, bus }) {
   const t = { ...tags, ...(names ? { name: names.name } : {}), public_transport: "platform" };
   if (names?.official_name) t.official_name = names.official_name;
   if (t.official_name === t.name) delete t.official_name;
-  dropBusTag(t);
+  if (bus) t.bus ??= "yes";
   delete t.alt_name;
   nameNumberedNetworkTags(t);
   nameNumberedRefs(t);
@@ -165,7 +165,7 @@ export async function runNetworkFix(feed, { network, onProgress = () => {} }) {
   const corrected = new Map();
   const nameOfPlatform = (key) => [...(platformsOf.get(key) ?? [])].map((p) => names.get(p)?.name).find(Boolean);
   for (const [key, o] of objects) {
-    if (kinds.get(key) === "platform") corrected.set(key, correctedPlatform(o.tags, names.get(key), { road: roadStops.has(key), way: key[0] === "w" }));
+    if (kinds.get(key) === "platform") corrected.set(key, correctedPlatform(o.tags, names.get(key), { road: roadStops.has(key), way: key[0] === "w", bus: vehicles.get(key).has("bus") }));
   }
   for (const [key, o] of objects) {
     if (kinds.get(key) !== "stop") continue;

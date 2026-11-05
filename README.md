@@ -72,7 +72,7 @@ coordinates are often tens of metres off), else at the projection of the GTFS st
 At the bottom of Settings, once a feed is loaded, **Correct a whole network** puts what is already mapped in OSM for a network in the form of this site, after a warning. It only gives a file to review in JOSM,
 and reads the stops and relations from OSM, the GTFS giving the networks and their area.
 
-- **Stops** of its route relations: `name` without the town, `official_name` with it, punctuation, no `bus=yes` on platforms, a missing `public_transport=platform`, or `highway` on a line on the road, GTFS ids and
+- **Stops** of its route relations: `name` without the town, `official_name` with it, punctuation, `bus=yes` on the platforms of bus and coach lines, a missing `public_transport=platform`, or `highway` on a line on the road, GTFS ids and
   numbered network tags tidied. Opposite stops of one name (within 200 m) get the same `official_name`. 
 - **Route and route_master relations**: `name`, `from`, `to`, `via`. The start of a name stays as it is (`Car Nomad 224:`), unless it was changed in Settings; stops told apart in a title stay.
 - **Stop_position and platform mixed up**: a stop_position keeps only its vehicle and `name`, the rest going to its platform. An object whose tag and role disagree, or without a tag, is judged by
@@ -177,8 +177,7 @@ They follow the OSM wiki's [Public transport](https://wiki.openstreetmap.org/wik
   `public_transport:version=2`, the network tags, `colour`/`colour:text` (from Settings, else from the GTFS), `gtfs:route_id`, `gtfs:trip_id:sample`,
   `gtfs:shape_id` (when matched from the shape). Every `gtfs:*` key carries the `:<feed>` suffix when a feed code is known.
 - **route_master**: `type=route_master`, `route_master=<mode>`, `ref`, `name`, network, colours, `gtfs:route_id`.
-- **platform**: `public_transport=platform`, `highway=bus_stop` on a node (`highway=platform` on a way), `trolleybus=yes` or `coach=yes` for these lines,
-  no `bus=yes` (an existing one is removed, unless the platform also serves another mode),
+- **platform**: `public_transport=platform`, `highway=bus_stop` on a node (`highway=platform` on a way), `bus=yes` for a bus or a coach (iD reports a `highway=bus_stop` without it as incomplete; an existing `bus=no` stays), `trolleybus=yes` or `coach=yes` for these lines,
   `name`, network, `gtfs:stop_id`, `gtfs:stop_name`, `gtfs:stop_code` (only when no ref holds that code), `ref` (stop_code, or the code of a NeTEx-style stop_id when OSM
   platforms already follow this), `local_ref` (platform_code), `wheelchair`. An existing `route_ref` gets the line.
 - **stop_position**: only `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`, and `coach=yes` for coaches) and `name`, see above.

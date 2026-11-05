@@ -216,9 +216,9 @@ test("what PTNA checks: no message on the generated relations", async () => {
   assert.equal(byName["Bus 2: Alpha → Alpha"].roundtrip, "yes");
   const masters = objs.flatMap((obj) => [...obj.modified.values()]).filter((o) => o.tags?.type === "route_master");
   assert.deepEqual(masters.map((m) => m.tags.name).sort(), ["Bus 1: Charlie ↔ Alpha", "Bus 2: Alpha"]);
-  // the vehicle on stop_positions (PTNA's check), not on platforms
+  // the vehicle on stop_positions (PTNA's check) and on platforms (iD's)
   for (const [, rel, obj] of routes) {
-    for (const [k, role] of rel.members.filter(([, r]) => r)) assert.equal(obj.get(k).tags.bus, role === "stop" ? "yes" : undefined, `${role} ${k}`);
+    for (const [k, role] of rel.members.filter(([, r]) => r)) assert.equal(obj.get(k).tags.bus, "yes", `${role} ${k}`);
   }
 });
 

@@ -347,15 +347,9 @@ export function stopRef(stop, stopId) {
 
 const PHYSICAL_TAGS = new Set(["public_transport", "highway", "bus", "trolleybus", "wheelchair"]); // survey data wins
 
-/** Remove bus=yes from a platform: PTv2 only asks for it on stop_positions. Kept when it tells the bus apart from another mode using the platform. */
-export function dropBusTag(t) {
-  const shared = t.railway || t.trolleybus === "yes" || t.coach === "yes" || OTHER_VEHICLES.some((v) => t[v] === "yes");
-  if (t.bus === "yes" && !shared) delete t.bus;
-}
-
-/** Platform tags taken from the GTFS. No bus=yes (see dropBusTag); trolleybus=yes and coach=yes say what highway=bus_stop does not. */
+/** Platform tags taken from the GTFS. bus=yes for a bus or a coach: without it, iD reports a highway=bus_stop as having incomplete tags. trolleybus=yes and coach=yes say what highway=bus_stop does not. */
 export function stopTags(stop, stopId, network, mode = "bus") {
-  const tags = { public_transport: "platform", highway: "bus_stop", ...(mode === "trolleybus" || mode === "coach" ? { [mode]: "yes" } : {}),
+  const tags = { public_transport: "platform", highway: "bus_stop", ...(VEHICLE[mode] === "bus" ? { bus: "yes" } : {}), ...(mode === "trolleybus" || mode === "coach" ? { [mode]: "yes" } : {}),
     name: stop.stop_name, ...network, [feedKey("gtfs:stop_id")]: stopId };
   if (stop.official_name) tags.official_name = stop.official_name;
   if (stop.stop_code) tags[feedKey("gtfs:stop_code")] = stop.stop_code;
@@ -705,7 +699,6 @@ export function enrich(obj, key, tags, sizes = null, ofStop = new Map()) {
     }
     else addTag(t, k, v);
   }
-  dropBusTag(t);
   delete t.alt_name;
 }
 

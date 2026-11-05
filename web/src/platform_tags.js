@@ -2,7 +2,7 @@
 // with the nearest OSM platform (within max_m, one platform per stop at most), to be reviewed in JOSM.
 //
 // Tags set: gtfs:stop_id:<feed>, gtfs:stop_name:<feed>, route_ref (routes of the network added to the existing values), and
-// wheelchair when missing. A bus=yes is removed (platforms.dropBusTag). The existing name is left unchanged.
+// wheelchair when missing. The existing name is left unchanged.
 
 import { feedCodeOf } from "./detect.js";
 import { Grid, bbox, latlon } from "./geo.js";
@@ -12,7 +12,7 @@ import { Store, completeWayNodes, platformsIn, writeOsm } from "./osm.js";
 import { stopNetworks } from "./pipeline.js";
 import { reviewRefs } from "./ref_review.js";
 import { settings } from "./settings.js";
-import { addStopValue, dropBusTag, nameNumberedNetworkTags, nameNumberedRefs, networkKeyFor } from "./platforms.js";
+import { addStopValue, nameNumberedNetworkTags, nameNumberedRefs, networkKeyFor } from "./platforms.js";
 import { osmPlatforms } from "./stops.js";
 import { log, sameTags, sortedBy } from "./util.js";
 
@@ -64,7 +64,6 @@ export function feedTags(tags, stop, feedId, network = tags.network) {
   }
   const refs = new Set([...(t.route_ref || "").split(";").filter(Boolean), ...stop.route_ref]);
   if (refs.size) t.route_ref = sortedBy(refs, refSortKey).join(";");
-  dropBusTag(t);
   if (WHEELCHAIR[stop.wheelchair_boarding]) t.wheelchair ??= WHEELCHAIR[stop.wheelchair_boarding];
   return t;
 }
