@@ -1,7 +1,7 @@
 // Correct what is already mapped for a whole network, without touching a trace: the stops of its route relations and the names of its route and route_master
 // relations are put in the form of this site. Only OSM is corrected, from OSM: the GTFS gives the networks and the area. Nothing is sent: the file is reviewed in JOSM.
 //
-// Stops: name and official_name (naming.stopNames), no bus=yes on platforms, GTFS ids and network tags tidied, a stop_position with only its vehicle and name, what it has more
+// Stops: name and official_name (naming.stopNames), no alt_name, no bus=yes on platforms, GTFS ids and network tags tidied, a stop_position with only its vehicle and name, what it has more
 // going to its platform; an object tagged as the other kind, or in the other role, put right (stopKind). Relations: name, from, to, via, these roles. No member moves.
 
 import { networkFromOsm } from "./detect.js";
@@ -41,6 +41,7 @@ function correctedPlatform(tags, names, { road, way }) {
   if (names?.official_name) t.official_name = names.official_name;
   if (t.official_name === t.name) delete t.official_name;
   dropBusTag(t);
+  delete t.alt_name;
   nameNumberedNetworkTags(t);
   nameNumberedRefs(t);
   for (const k of Object.keys(t)) {

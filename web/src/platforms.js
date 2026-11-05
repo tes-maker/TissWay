@@ -706,6 +706,7 @@ export function enrich(obj, key, tags, sizes = null, ofStop = new Map()) {
     else addTag(t, k, v);
   }
   dropBusTag(t);
+  delete t.alt_name;
 }
 
 /** The only tags of a stop_position: the stop's data (ref, network, operator...) is on the platform. */
@@ -718,11 +719,11 @@ const OTHER_FEATURE = /^(?:crossing(?::.*)?|traffic_signals(?::.*)?|traffic_calm
 const STOP_IDENTITY = /^(?:gtfs:|(?:ref|local_ref|network|operator|route_ref)(?::|$))/;
 
 /** {tags, moved} of an object that is a stop_position: tags, only public_transport=stop_position, its vehicles and its name, as well as what describes something else on the node
- * (highway=traffic_signals, crossing...), and moved, the tags that belong on its platform. direction is dropped, and highway=bus_stop or platform, which its platform has. */
+ * (highway=traffic_signals, crossing...), and moved, the tags that belong on its platform. direction and alt_name are dropped, and highway=bus_stop or platform, which its platform has. */
 export function stopPositionOnly(old, name, vehicles = []) {
   const tags = { public_transport: "stop_position" }, moved = {};
   for (const [k, v] of Object.entries(old)) {
-    if (k === "public_transport" || k === "name" || k === "direction") continue;
+    if (k === "public_transport" || k === "name" || k === "direction" || k === "alt_name") continue;
     if (k === "highway") {
       if (v !== "bus_stop" && v !== "platform") tags[k] = v;
     } else if (VEHICLE_KEYS.has(k) || OTHER_FEATURE.test(k)) tags[k] = v;
