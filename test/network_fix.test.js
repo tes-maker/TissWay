@@ -62,13 +62,26 @@ const line = () => {
 const run = async (network = "Nomad Car") => runNetworkFix(await Feed.open(makeZip(GTFS)), { network });
 const read = (xml) => new Map(parseXml(xml).children.map((e) => [`${e.name[0]}${e.attrs.id}`, { ...e.attrs, name: e.name, members: e.children.filter((c) => c.name === "member").map((c) => c.attrs.ref), tags: Object.fromEntries(e.children.filter((c) => c.name === "tag").map((c) => [c.attrs.k, c.attrs.v])) }]));
 
-test("the stops of the network: name, official_name, no bus=yes on platforms, ids", async () => {
+test("the stops of the network: name, official_name, bus=yes on platforms, ids", async () => {
   line();
   const out = read((await run()).xml);
-  assert.deepEqual(out.get("n1").tags, { public_transport: "platform", highway: "bus_stop", name: "Charlotte Corday", official_name: "MONDEVILLE - Charlotte Corday" });
+  assert.deepEqual(out.get("n1").tags, { public_transport: "platform", highway: "bus_stop", bus: "yes", name: "Charlotte Corday", official_name: "MONDEVILLE - Charlotte Corday" });
+  assert.equal(out.get("n3").tags.bus, "yes");
   assert.equal(out.get("n3").tags.name, "Gare");
   assert.equal(out.get("n3").tags.official_name, "LISIEUX - Gare");
   assert.equal(out.get("n3").tags["gtfs:stop_id"], "NOMAD:B");
+});
+
+test("bus=yes only on the platforms of bus and coach lines, and an existing bus=no stays", async () => {
+  for (const [route, expected] of [["bus", "yes"], ["coach", "yes"], ["trolleybus", undefined], ["tram", undefined]]) {
+    line();
+    delete answer.objects[0].tags.bus;
+    answer.relations[0].tags.route = route;
+    assert.equal(read((await run()).xml).get("n1").tags.bus, expected, route);
+  }
+  line();
+  answer.objects[0].tags.bus = "no";
+  assert.equal(read((await run()).xml).get("n1").tags.bus, "no");
 });
 
 test("no alt_name on the stops, even a stop already right otherwise, and none goes from a stop_position to its platform", async () => {
@@ -109,7 +122,7 @@ test("nothing of another network, and no way in the file", async () => {
 
 test("a shared stop already in this form stays out of the file: nothing differs once written", async () => {
   line();
-  answer.objects[2].tags = { public_transport: "platform", highway: "bus_stop", name: "Gare", official_name: "LISIEUX - Gare", network: "Nomad Car;Twisto", operator: "Keolis;RATP Dev" };
+  answer.objects[2].tags = { public_transport: "platform", highway: "bus_stop", bus: "yes", name: "Gare", official_name: "LISIEUX - Gare", network: "Nomad Car;Twisto", operator: "Keolis;RATP Dev" };
   const { xml, summary } = await run();
   assert.ok(!read(xml).has("n3"));
   assert.equal(summary["corrected stops"], 2);

@@ -54,7 +54,7 @@ and GTFS keys, and `test/pipeline.test.js` runs them on generated relations.
 - **several values**: `gtfs:route_id`, `gtfs:shape_id` and `gtfs:trip_id:sample` hold every id that applies, separated by `;`: the shapes of a variant
   with one sample trip each, the route_ids a route_master already holds that are still in the feed. Within OSM's 255 characters.
 - **GTFS keys**: all with the feed code as a suffix, the mix being an error for PTNA. Keys left without it on an updated relation are removed.
-- **platform**: `public_transport=platform`, `highway=bus_stop` (`highway=platform` on a way, `bus_stop` being for nodes only). No `bus=yes`: an existing one is removed, unless the platform also serves another mode. An `alt_name` is removed from the stops of the file (new line, "Correct a whole network").
+- **platform**: `public_transport=platform`, `highway=bus_stop` (`highway=platform` on a way, `bus_stop` being for nodes only). `bus=yes` for a bus or a coach (iD reports a `highway=bus_stop` without it as incomplete; an existing `bus=no` stays). An `alt_name` is removed from the stops of the file (new line, "Correct a whole network").
   An existing `route_ref` gets the line, none is created from a partial selection.
 - **one physical stop, several networks**: exported platforms combine `network` and its Wikidata/Wikipedia values in network order, separated by `;`.
   `gtfs:stop_id` is the ID of the stop of the first network, the one of `ref` and `ref:FR:Atoumod` without suffix, taken from them if needed. The IDs of the other
