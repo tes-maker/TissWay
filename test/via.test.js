@@ -19,6 +19,23 @@ const OSM = `<osm>
 
 test("chooseVias", () => assert.deepEqual(chooseVias([["a", "b", "c"], ["a", "c"]]), [["b"], []])); // the shorter relation keeps its name
 
+for (const [what, stops, vias] of [
+  ["other stops", [["a", "b", "d"], ["a", "c", "d"]], [["b"], ["c"]]],
+  ["the same stops in another order", [["a", "b", "c", "d"], ["a", "c", "b", "d"]], [["b"], ["c"]]],
+  ["a stop served twice", [["a", "b", "c", "b", "d"], ["a", "b", "c", "d"]], [["b"], []]],
+  ["three relations, two in another order", [["a", "b", "c", "d"], ["a", "c", "b", "d"], ["a", "e", "d"]], [["b"], ["c"], ["e"]]],
+  ["the very same stops: nothing tells them apart", [["a", "b", "d"], ["a", "b", "d"]], [[], []]],
+]) {
+  test(`chooseVias: ${what}`, () => {
+    const chosen = chooseVias(stops);
+    assert.deepEqual(chosen, vias);
+    const differ = (a, b) => JSON.stringify(a) !== JSON.stringify(b);
+    stops.forEach((s, i) => stops.forEach((other, j) => {
+      if (i < j && differ(s, other)) assert.ok(differ(chosen[i], chosen[j]), `${s} and ${other} read the same`);
+    }));
+  });
+}
+
 test("addVias", async () => {
   const root = parseXml(OSM);
   const { changes, warnings } = await addVias(root);

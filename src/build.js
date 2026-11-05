@@ -225,15 +225,14 @@ class LineBuilder {
     });
     for (const group of groups.values()) {
       if (group.length < 2) continue;
-      const names = group.map((i) => dedupe(variants[i].seq.map((id) => this.stops.df.get(id).stop_name)));
-      const vias = chooseVias(names);
+      // by their labels: two stops called "Mairie" in two towns are two stops
+      const stopsOf = (i) => variants[i].seq.map((id) => this.stops.df.get(id));
+      const vias = chooseVias(group.map((i) => dedupe(stopsOf(i).map((s) => s.label))));
       group.forEach((i, k) => {
         if (!vias[k].length) return;
-        drafts[i][1].via = joinIds(vias[k]); // the exact names of the platforms
+        drafts[i][1].via = joinIds(vias[k].map((label) => stopsOf(i).find((s) => s.label === label).stop_name)); // the exact names of the platforms
         const [from, to] = endpoints[i];
-        const stops = variants[i].seq.map((id) => this.stops.df.get(id));
-        const labels = vias[k].map((name) => stops.find((s) => s.stop_name === name)?.label ?? name);
-        drafts[i][1].name = tripTitle(modePrefix(this.mode), ref, from, to, labels);
+        drafts[i][1].name = tripTitle(modePrefix(this.mode), ref, from, to, vias[k]);
       });
     }
     this.sameNames = [...counter(drafts.map(([, tags]) => tags.name))].filter(([, n]) => n > 1).map(([name]) => name);
