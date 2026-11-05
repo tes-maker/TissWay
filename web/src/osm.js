@@ -203,7 +203,7 @@ function outputPlatformTags(tags) {
     numberedNetworks.forEach((k) => delete out[k]);
   }
 
-  for (const key of ["network:wikidata", "network:wikipedia"]) {
+  for (const key of ["network:wikidata", "network:wikipedia", "operator"]) {
     const numbered = Object.keys(out).filter((k) => k.startsWith(`${key}:`) && /^\d+$/.test(k.slice(key.length + 1)));
     const named = networks.slice(1).map((network) => `${key}:${networkSuffix(network)}`).filter((k) => k in out);
     const values = tagValues(out[key], ...numbered.sort((a, b) => Number(a.slice(key.length + 1)) - Number(b.slice(key.length + 1))).map((k) => out[k]),

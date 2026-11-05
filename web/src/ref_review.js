@@ -11,10 +11,13 @@
 // Two networks with very close names ("Nomad Car" and "Nomad") may be one network under two names: the window asks, nothing is merged without an answer.
 // The answer is kept in settings.network_merges, because each run brings the name of the feed back.
 //
+// The operators follow the refs: the one of the first network is in operator, those of the others in operator:<network>, which a file writes operator=a;b, in the order of network=a;b.
+// So one already mapped goes with the network owning the stop, and moves with it when the priority changes. settings.operators gives the operator of each network it names.
+//
 // The review keeps the ref tags detected by the run: changing a setting afterwards resets what a run detected.
 
 import { dist } from "./geo.js";
-import { unaccent } from "./naming.js";
+import { operatorOf, unaccent } from "./naming.js";
 import { CODE_IN_ID, NETWORK_KEYS, nameNumberedNetworkTags, refKeyFor, refKeyOn, sizeOf } from "./platforms.js";
 import { settings } from "./settings.js";
 import { log } from "./util.js";
@@ -312,6 +315,18 @@ export function applyPriority(review, order) {
   return changed;
 }
 
+/** The operators of the settings on a platform, each in the place of its network. An operator mapped that is no longer there is reported. */
+function placeOperators(review, key) {
+  const t = review.obj.get(key).tags, nets = networksOf(t);
+  for (const network of nets) {
+    const operator = operatorOf(network);
+    if (operator) t[slotOf(t, "operator", network)] = operator;
+  }
+  const now = nets.flatMap((network) => split(t[slotOf(t, "operator", network)]));
+  const lost = split(review.obj.base.get(key)?.tags?.operator).filter((v) => !now.includes(v));
+  if (lost.length) review.corrected.push(`${t.name || key} (${key}): operator ${lost.join(";")} replaced by ${now.join(";")}`);
+}
+
 /** Correct and review the refs of the platforms of the file: {obj, order, corrected, toCheck, removed}. Without settings.stop_owners, a platform only changes
  * owner when both sizes are known, like during the run (see takesOver).
  * sizes, ofStop: see stopNetworks. stops: the GTFS stops. feed: suffix of the gtfs:* tags. */
@@ -345,6 +360,7 @@ export function reviewRefs(obj, { sizes = null, ofStop: feedOfStop = new Map(), 
     const best = trusted.find((n) => nets.includes(n));
     if (best && best !== t.network && promote(t, best, [...review.bases, "local_ref"])) review.corrected.push(`${t.name || key} (${key}): ref given to ${best}, the first in priority`);
   }
+  for (const key of keys) placeOperators(review, key);
   for (const line of review.corrected) log.info(`Ref corrected: ${line}`);
   for (const line of review.toCheck) log.warn(`Ref to check: ${line}`);
   return review;

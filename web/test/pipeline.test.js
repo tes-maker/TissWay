@@ -288,6 +288,19 @@ test("a line tagged with an operator shares it, the GTFS agency is never used fo
   assert.ok(created.length && created.every(([, o]) => !o.tags.operator));
 });
 
+test("the operator of the settings goes on the relations and platforms of the line, not on stop_positions, and replaces the one of the relations", async () => {
+  settings.operators = { Bustown: "Transdev" };
+  const { state, xml } = await runRoutes(await open(), { network: "Bustown", ref: "R1" });
+  assert.equal(state.obj.get("r30").tags.operator, "Transdev");
+  const objects = [...state.obj.modified.values()].filter((o) => o.tags);
+  assert.equal(objects.find((o) => o.tags.type === "route_master").tags.operator, "Transdev");
+  const platforms = objects.filter((o) => o.tags.public_transport === "platform");
+  assert.ok(platforms.length && platforms.every((o) => o.tags.operator === "Transdev"));
+  assert.ok(objects.some((o) => o.tags.public_transport === "stop_position"));
+  assert.ok(objects.filter((o) => o.tags.public_transport === "stop_position").every((o) => !o.tags.operator));
+  assert.ok(!xml.includes("Keolis"));
+});
+
 test("our PTNA comparison behaves like PTNA's", () => {
   assert.ok(ptnaMatches("Gare Routière", "CAEN Gare Routière"));
   assert.ok(ptnaMatches("Gare (Départ)", "CAEN Gare"));

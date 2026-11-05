@@ -5,7 +5,7 @@
 // - the comment (3rd field) gets the termini of the GTFS variants, like the route_master names; when route_long_name reads
 //   "A <> B via X", the termini follow the order A, B and "via X" is appended; route_long_name when the route has no trip;
 // - the type (2nd field) follows the GTFS route_type; the GTFS feed is filled in when empty;
-// - the operator (6th field) only comes from the operator option: PTNA compares it with the operator of the OSM relations, and the
+// - the operator (6th field) only comes from the operator option, else settings.operators: PTNA compares it with the operator of the OSM relations, and the
 //   agency of a GTFS is often not the real operator. Existing values are kept;
 // - the ref (1st field) is kept, since it must stay the one of the OSM tags: differences with route_short_name are reported,
 //   and refGtfs replaces them;
@@ -24,7 +24,7 @@ import { feedCodeOf } from "./detect.js";
 import { listIn, log } from "./util.js";
 import { splitCsvLine, lineVariants, osmRoute, stopSequences } from "./gtfs.js";
 import { lookup } from "./lookup.js";
-import { agencyNetworks, cleanStopName, fixAccents, masterEndpointsLabel, routeLabel, unaccent, words } from "./naming.js";
+import { agencyNetworks, cleanStopName, fixAccents, masterEndpointsLabel, operatorOf, routeLabel, unaccent, words } from "./naming.js";
 import { activeFeed, settings } from "./settings.js";
 import { compare, counter, sortedBy } from "./util.js";
 
@@ -310,7 +310,8 @@ export async function buildList(feed, network, { inputLines = null, title = null
     settings.feed = await feedCodeOf(feed);
     if (!settings.feed) log.warn("No GTFS feed code found in OSM for this feed: the gtfs-feed field stays empty. Set its code from the OSM wiki's List of GTFS feeds in Settings.");
   }
-  const final = routes.map((r) => ({ ...r, operator: operator || r.operator, label: withLongName(labels.get(r.route_id) ?? null, r.route_long_name) }));
-  if (inputLines) return update(inputLines, final, network, refGtfs, Boolean(operator));
+  const forced = operator || operatorOf(network);
+  const final = routes.map((r) => ({ ...r, operator: forced || r.operator, label: withLongName(labels.get(r.route_id) ?? null, r.route_long_name) }));
+  if (inputLines) return update(inputLines, final, network, refGtfs, Boolean(forced));
   return generate(title || network, network, final);
 }
