@@ -36,7 +36,7 @@ for this run":
 | Tags holding the stop_id (`ref:FR:Atoumod`) | `ref:*` tags of nearby platforms whose values are mostly GTFS stop_ids. |
 | Platform `ref` from a NeTEx stop_id | On when at least 3 nearby platforms already follow this. |
 | Driving side | Country of the stops (Nominatim), then its driving side (Wikidata). |
-| Town of every stop, for `official_name` and the titles | Nominatim, in the language of the feed. |
+| Town of every stop, for `official_name` and the titles | Nominatim, in the language of the feed. In France, always the commune: the commune nouvelle, never the commune déléguée in it nor the arrondissement. |
 | Accents | The spelling of OSM platforms of the same name, else Wiktionary (see limits below). |
 
 Any of this can be overridden on the Settings page. A service that fails is reported in the log and the run goes on without it.
@@ -102,6 +102,7 @@ Everything is called from the browser, so these must allow cross-origin requests
 | [Valhalla](https://github.com/valhalla/valhalla), `valhalla1.openstreetmap.de` by default | Map-matching, one request per second at most. | Optional (`?api_key=`) |
 | [Overpass](https://wiki.openstreetmap.org/wiki/Overpass_API), `overpass-api.de` by default | The ways, platforms and relations of OSM, with their versions. | None |
 | [Nominatim](https://nominatim.org) | Towns and countries, one request per second at most. | None |
+| [Découpage administratif](https://geo.api.gouv.fr/decoupage-administratif), France only | Are capitals at the start of a stop name a commune déléguée of its commune nouvelle? | None |
 | [Wikidata](https://www.wikidata.org) | Driving sides, network entries, Wikipedia pages. | None |
 | [Wiktionary](https://www.wiktionary.org) | Spelling, in the language of the feed. | None |
 
@@ -222,6 +223,7 @@ An unknown key is an error. To add a setting, add it to the list in `src/setting
 
 ## Known limits
 
+- Communes nouvelles: a stop called only "Mairie" gets `THUE ET MUE - Mairie`, whichever former commune it is in, like its neighbours: nothing is added to the name of the stop.
 - Accents: a word with a Wiktionary page of its own is left alone, since it cannot be told from its accented form ("marche" /
   "marché"), and Wiktionary also has pages for words of other languages and for proper names. So "Ecole" or "Eglise" stay as they are
   unless a nearby OSM platform spells them. What comes from Wiktionary is reported as a warning, to check.

@@ -123,7 +123,6 @@ const LINK = new RegExp(`^${LINK_WORDS}$`);
 /** Upper-case words of a place or a stop name, "St" and "Ste" read as "Saint" and "Sainte". */
 const tokens = (text) => unaccent(text).toUpperCase().split(/[^\p{L}\p{N}']+/u).filter(Boolean)
   .map((w) => ({ ST: "SAINT", STE: "SAINTE" }[w] ?? w));
-const isSaint = (w) => w === "SAINT" || w === "SAINTE";
 
 /** name without its town when it can be taken out: "Caen - Gare", "Gare - Caen", "Gare (Caen)", "Gare, Caen", "Mairie Gaillon". null if not
  * ("Hauts de Thaon" needs it). */
@@ -139,17 +138,14 @@ function withoutTown(town, name) {
   return before.length && LINK.test(before.at(-1)) ? null : name.slice(0, end.index);
 }
 
-/** Does the stop name say its town, in any form the feeds use? The whole town anywhere ("Hauts de Mondeville", "Clinique Les Damps"), or at
- * its start a proper part of it ("Norrey Calvaire" in Saint-Manvieu-Norrey, "CHERBOURG-GARE", "Saint-Pierre-sur-Dives" in
- * Saint-Pierre-en-Auge), but not a word that only looks like it ("Mont aux Malades" in Mont-Saint-Aignan, "Saint-Clair" elsewhere). */
+/** Does the stop name say its whole town, anywhere ("Hauts de Mondeville", "Clinique Les Damps")? A part of it does not count: "Norrey Calvaire" in Saint-Manvieu-Norrey, "Saint-Pierre-sur-Dives" in
+ * Saint-Pierre-en-Auge are former communes, which do not replace the commune nouvelle. */
 function saysTown(town, name) {
   if (withoutTown(town, name) !== null) return true;
   const inName = tokens(name), all = tokens(town);
   const inTown = /^(?:LE|LA|LES|L')$/.test(all[0]) ? all.slice(1) : all;
   for (let i = 0; i + inTown.length <= inName.length; i++) if (inTown.every((w, k) => inName[i + k] === w)) return true;
-  if (!inName.length || LINK.test(inName[1] ?? "")) return false;
-  if (isSaint(inTown[0]) && inName[0] === inTown[0] && inName[1] === inTown[1]) return true;
-  return inName[0].length > 3 && inTown.includes(inName[0]) && !LINK.test(inName[0]) && !isSaint(inName[0]);
+  return false;
 }
 
 /** Does the name begin with a place in capitals, maybe not the one the position gives: a former commune, or just over the boundary?
@@ -191,8 +187,9 @@ export function stopKey(name) {
 /** {name, official_name} of a stop: {name: "Charlotte Corday", official_name: "MONDEVILLE - Charlotte Corday"}, whether the town is in the name
  * given or not. A town that cannot be taken out ("Hauts de Mondeville"), a name that is only the town, or no known town: no official_name, it
  * would say nothing more. Capitals at the start that are not the town of the position are taken out when isPlace(capitals) confirms a place:
- * a former commune, or just over the boundary; "CHU Côte de Nacre" stays whole. */
-export async function stopNames(places, name, isPlace = async () => false) {
+ * a former commune, or just over the boundary; "CHU Côte de Nacre" stays whole. The prefix of a commune nouvelle is the commune nouvelle: the commune déléguée a name says is part of
+ * the name of the stop ("Brouay Mairie" in Thue et Mue: official_name "THUE ET MUE - Brouay Mairie"), also in capitals when isDelegated(capitals, commune) confirms it. */
+export async function stopNames(places, name, isPlace = async () => false, isDelegated = async () => false) {
   const named = (town, rest) => {
     const stop = cleanStopName(rest.replace(/^\(([^()]*)\)$/, "$1")); // "CAEN (Gare)"
     return { name: stop, official_name: `${upperTown(town)} - ${stop}` };
@@ -204,7 +201,9 @@ export async function stopNames(places, name, isPlace = async () => false) {
   }
   if (CAPITALS_FIRST.test(name)) {
     const other = capitalsFirst(name);
-    return other && (await isPlace(other.place)) ? named(other.place, other.rest) : { name };
+    if (!other) return { name };
+    if (towns.length && (await isDelegated(other.place, towns[0]))) return named(towns[0], `${other.place} ${other.rest}`);
+    return (await isPlace(other.place)) ? named(other.place, other.rest) : { name };
   }
   if (!towns.length || towns.some((t) => saysTown(t, name))) return { name };
   return named(towns[0], name);

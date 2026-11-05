@@ -259,7 +259,7 @@ async function nameStops(stops, used, trips, lang, onProgress) {
   onProgress("Towns of the stops (Nominatim)…"); // with the opposite stops: the data of one may replace the other (platforms.fixSide)
   for (const id of new Set(used.flatMap((u) => [u, ...(stops.neighbours.get(u) || [])]))) {
     const s = stops.df.get(id);
-    const { name, official_name } = await stopNames(await placesOf(s), s.stop_name, (place) => lookup.placeNear(place, s.lat, s.lon));
+    const { name, official_name } = await stopNames(await placesOf(s), s.stop_name, (place) => lookup.placeNear(place, s.lat, s.lon), lookup.isDelegated);
     s.stop_name = name;
     s.official_name = official_name;
   }
