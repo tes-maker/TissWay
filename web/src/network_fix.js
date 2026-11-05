@@ -11,9 +11,10 @@ import { agencyNetworks, cleanStopName, masterLabel, nameKey, routeTitle, slug, 
 import { Store, completeWayNodes, onRoad, readObjects, routesIn, writeOsm } from "./osm.js";
 import { selectRoutes } from "./pipeline.js";
 import { networkStops } from "./platform_tags.js";
+import { chooseVias } from "./via.js";
 import { VEHICLE, dropBusTag, nameNumberedNetworkTags, nameNumberedRefs, stopPositionOnly, takeFromStopPosition } from "./platforms.js";
 import { settings } from "./settings.js";
-import { dedupe, log, sameTags } from "./util.js";
+import { dedupe, listIn, log, sameTags } from "./util.js";
 
 const PAD_M = 300;
 const SAME_PLACE_M = 200; // the stops of one name this close are in one place: opposite stops get the same official_name, and Nominatim is asked once
@@ -209,7 +210,7 @@ export async function runNetworkFix(feed, { network, onProgress = () => {} }) {
   const stopOf = (member) => names.get(member);
   const endpoints = new Map();
   let nRoutes = 0;
-  const skipped = [];
+  const skipped = [], trips = [];
   for (const [key, o] of routes) {
     const ordered = (role) => o.members.filter(([ref, r]) => r.startsWith(role) && stopOf(ref)).map(([ref]) => stopOf(ref));
     const members = ordered("platform").length >= 2 ? ordered("platform") : ordered("stop");
@@ -217,15 +218,24 @@ export async function runNetworkFix(feed, { network, onProgress = () => {} }) {
       skipped.push(key);
       continue;
     }
-    const [first, last] = [members[0], members.at(-1)];
-    const [from, to] = [first, last].map(stopLabel);
+    const [from, to] = [members[0], members.at(-1)].map(stopLabel);
     endpoints.set(key, [from, to]);
-    const vias = viasOf(o.tags, renames);
-    const prefix = prefixOf(o.tags, o.tags.route);
-    const labels = vias.map((v) => stopLabel(members.find((s) => s.name === v) ?? { name: v }));
-    const name = tripTitle(prefix, o.tags.ref, from, to, labels);
-    const tags = { ...o.tags, name, from: first.name, to: last.name, ...(o.tags.via ? { via: vias.join(";") } : {}) };
-    if (set(key, o, tags)) nRoutes++;
+    trips.push({ key, o, members, from, to, prefix: prefixOf(o.tags, o.tags.route) });
+  }
+  // relations of one line sharing their termini are told apart like the variants of a line generated; alone, a relation keeps what it had
+  const sameTitle = new Map();
+  for (const trip of trips) listIn(sameTitle, [trip.o.tags.route, trip.prefix, trip.o.tags.ref, trip.from, trip.to].join("\u0001")).push(trip);
+  for (const group of sameTitle.values()) {
+    const chosen = group.length > 1 ? chooseVias(group.map((trip) => dedupe(trip.members.map(stopLabel)))) : null;
+    group.forEach((trip, k) => {
+      const { key, o, members, from, to, prefix } = trip;
+      const vias = chosen ? chosen[k].map((label) => members.find((s) => stopLabel(s) === label).name) : viasOf(o.tags, renames);
+      const labels = chosen ? chosen[k] : vias.map((v) => stopLabel(members.find((s) => s.name === v) ?? { name: v }));
+      const { via, ...others } = o.tags;
+      const hasVia = chosen ? vias.length > 0 : via !== undefined;
+      const tags = { ...others, name: tripTitle(prefix, o.tags.ref, from, to, labels), from: members[0].name, to: members.at(-1).name, ...(hasVia ? { via: [...new Set(vias)].join(";") } : {}) };
+      if (set(key, o, tags)) nRoutes++;
+    });
   }
   if (skipped.length) log.warn(`${skipped.length} route relation(s) with less than two named stops, left as they are (to check): ${skipped.join(", ")}`);
 

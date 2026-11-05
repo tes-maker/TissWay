@@ -57,12 +57,13 @@ function routeStops(rel, objs, key) {
 
 /** For each relation (ordered list of stops), the intermediate stops to name after "via". Each relation must stand apart from
  * every other relation it has at least one more stop than: the stops setting it apart from the most relations at once are
- * picked greedily (on ties, the least frequent in the group, then the first on the way). */
+ * picked greedily (on ties, the least frequent in the group, then the first on the way). Relations with the same stops in another order, or passing twice at one of them, would
+ * still read the same: they get the stop where they part. Only relations with the very same list of stops end up alike. */
 export function chooseVias(stops) {
   const middles = stops.map((s) => s.slice(1, -1));
   const sets = stops.map((s) => new Set(s));
   const freq = counter(middles.flatMap((m) => [...new Set(m)]));
-  return middles.map((mid, i) => {
+  const vias = middles.map((mid, i) => {
     const todo = new Map();
     stops.forEach((_, j) => {
       const diff = new Set(mid.filter((k) => !sets[j].has(k)));
@@ -76,6 +77,21 @@ export function chooseVias(stops) {
     }
     return [...new Set(mid)].filter((k) => chosen.has(k));
   });
+  const same = (a, b) => a.length === b.length && a.every((k, n) => k === b[n]);
+  for (let pass = 0; pass < stops.length; pass++) {
+    for (let i = 0; i < stops.length; i++) {
+      for (let j = i + 1; j < stops.length; j++) {
+        if (!same(vias[i], vias[j]) || same(stops[i], stops[j])) continue;
+        const at = middles[i].findIndex((k, n) => k !== middles[j][n]);
+        const parting = at < 0 ? middles[i].length : at;
+        for (const r of [i, j]) {
+          const kept = new Set([...vias[r], middles[r][parting]].filter(Boolean));
+          vias[r] = [...new Set(middles[r])].filter((k) => kept.has(k));
+        }
+      }
+    }
+  }
+  return vias;
 }
 
 /** Rename the relations of a root element of parseXml in place; returns {changes: [[old, new]], warnings}. */

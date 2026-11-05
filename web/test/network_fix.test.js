@@ -138,6 +138,58 @@ test("variants told apart keep their via: the tag and the title follow the new n
   assert.equal(route.tags.name, "Car Nomad 224: MONDEVILLE Charlotte Corday → MONDEVILLE Mairie → LISIEUX Gare");
 });
 
+const twin = (members, extra = {}) => ({ type: "relation", id: 33, version: 5, tags: { type: "route", route: "bus", ref: "224", network: "Nomad Car", name: "Car Nomad 224: A => B", ...extra }, members });
+const platformNamed = (id, name, lat = 49.002) => node(id, { public_transport: "platform", highway: "bus_stop", name }, lat);
+const twoVariants = (one, two) => {
+  line();
+  answer.objects = [answer.objects[0], answer.objects[2], platformNamed(5, one), platformNamed(6, two)];
+  answer.relations[0].members = [member("node", 1, "platform"), member("node", 5, "platform"), member("node", 3, "platform")];
+  answer.relations.push(twin([member("node", 1, "platform"), member("node", 6, "platform"), member("node", 3, "platform")]));
+};
+
+test("two relations with the same title get their vias, in the tag and in the title", async () => {
+  twoVariants("Mairie", "Eglise");
+  const out = read((await run()).xml);
+  assert.equal(out.get("r30").tags.name, "Car Nomad 224: MONDEVILLE Charlotte Corday → MONDEVILLE Mairie → LISIEUX Gare");
+  assert.equal(out.get("r30").tags.via, "Mairie");
+  assert.equal(out.get("r33").tags.name, "Car Nomad 224: MONDEVILLE Charlotte Corday → MONDEVILLE Eglise → LISIEUX Gare");
+  assert.equal(out.get("r33").tags.via, "Eglise");
+});
+
+test("two stops of one name in two towns tell two relations apart", async () => {
+  twoVariants("Mairie", "Mairie");
+  answer.objects[3] = platformNamed(6, "Mairie", 49.008);
+  const out = read((await run()).xml);
+  assert.match(out.get("r30").tags.name, /→ MONDEVILLE Mairie →/);
+  assert.match(out.get("r33").tags.name, /→ LISIEUX Mairie →/);
+  assert.deepEqual([out.get("r30").tags.via, out.get("r33").tags.via], ["Mairie", "Mairie"]);
+});
+
+test("a relation whose stops another one all serves keeps its short title, an old via leaves it", async () => {
+  twoVariants("Mairie", "Eglise");
+  answer.relations[1 + 2].members = [member("node", 1, "platform"), member("node", 3, "platform")];
+  answer.relations[1 + 2].tags.via = "Eglise";
+  const out = read((await run()).xml);
+  assert.equal(out.get("r33").tags.name, "Car Nomad 224: MONDEVILLE Charlotte Corday → LISIEUX Gare");
+  assert.equal(out.get("r33").tags.via, undefined);
+  assert.equal(out.get("r30").tags.via, "Mairie");
+});
+
+test("two relations with the very same stops: a warning, nothing invented", async () => {
+  twoVariants("Mairie", "Mairie");
+  const out = read((await run()).xml);
+  assert.equal(out.get("r30").tags.via, undefined);
+  assert.equal(out.get("r30").tags.name, out.get("r33").tags.name);
+});
+
+test("relations told apart: run again, nothing to correct", async () => {
+  twoVariants("Mairie", "Eglise");
+  const first = read((await run()).xml);
+  answer.objects = answer.objects.map((e) => ({ ...e, tags: first.get(`n${e.id}`)?.tags ?? e.tags }));
+  answer.relations = answer.relations.map((e) => ({ ...e, tags: first.get(`r${e.id}`)?.tags ?? e.tags }));
+  await assert.rejects(run(), /Nothing to correct/);
+});
+
 test("stops between the termini in a name, without via, are kept", async () => {
   line();
   answer.relations[0].tags.name = "Car Nomad 224: A → X → B";

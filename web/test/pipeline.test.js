@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import { makeZip, ptnaMatches, ptnaProblems } from "./helpers.js";
 import { Feed } from "../src/gtfs.js";
+import { lookup } from "../src/lookup.js";
 import { services } from "../src/net.js";
 import { parseXml } from "../src/osm.js";
 import { SelectionError, runRoutes, selectRoutes } from "../src/pipeline.js";
@@ -248,6 +249,21 @@ test("variants sharing their termini: the vias of the title say their town too, 
     ["Bus 1: FLEURY-SUR-ORNE Alpha → FLEURY-SUR-ORNE Bravo → FLEURY-SUR-ORNE Charlie", "Bravo"],
     ["Bus 1: FLEURY-SUR-ORNE Alpha → FLEURY-SUR-ORNE Delta → FLEURY-SUR-ORNE Charlie", "Delta"],
   ]);
+});
+
+test("variants told apart by two stops of one name in two towns: the title says the town, the via tag the name", async () => {
+  settings.update_existing = false;
+  const zip = { ...GTFS, "stops.txt": "stop_id,stop_name,stop_lat,stop_lon\nA,Alpha,49.00025,1.00015\nB,CAEN - Mairie,49.0007,1.00015\nD,FLERS - Mairie,49.0009,1.00015\nC,Charlie,49.0014,1.00015\n",
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\nt1,A,1\nt1,B,2\nt1,C,3\nt2,A,1\nt2,D,2\nt2,C,3\n" };
+  const place = lookup.placeNear;
+  lookup.placeNear = async () => true;
+  try {
+    const { state } = await runRoutes(await Feed.open(makeZip(zip)), { network: "Bustown", ref: "R1" });
+    const names = [...state.obj.modified.values()].filter((o) => o.tags?.type === "route" && o.tags.name).map((o) => [o.tags.name, o.tags.via]).sort();
+    assert.deepEqual(names, [["Bus 1: Alpha → CAEN Mairie → Charlie", "Mairie"], ["Bus 1: Alpha → FLERS Mairie → Charlie", "Mairie"]]);
+  } finally {
+    lookup.placeNear = place;
+  }
 });
 
 test("several shapes for a variant: separated by ;, and the feed's other route_ids stay on the route_master", async () => {
