@@ -1,6 +1,6 @@
 // Names: network of a GTFS agency, stop labels used in relation names, relation names.
 //
-// Titles of the lines: route "Bus 12: VILLE Arret → VILLE Arret", "Bus 12: VILLE Arret → X → VILLE Arret" for variants sharing their termini; route_master
+// Titles of the lines (tripTitle): route "Bus 12: VILLE Arret → VILLE Arret", "Bus 12: VILLE Arret → VILLE Arret → VILLE Arret" for variants sharing their termini; route_master
 // "Bus 12: VILLE Arret ↔ VILLE Arret" ("A1 / A2 ↔ B" when several origins share a terminus). The stops are labelled by routeLabel. The stops themselves get name = "Arret" and official_name = "VILLE - Arret" (stopNames).
 
 import { settings } from "./settings.js";
@@ -212,8 +212,18 @@ export async function stopNames(places, name, isPlace = async () => false, isDel
 /** Title of a route relation or a route_master. A ":" in a stop name would be read as the end of the "<Prefix> <ref>:" part (settings.prefixes). OSM takes 255
  * characters in a tag: alternatives are tried from the most complete. */
 export function routeName(mode, ref, ...labels) {
-  return routeTitle(settings.prefixes[mode] || mode[0].toUpperCase() + mode.slice(1), ref, ...labels);
+  return routeTitle(modePrefix(mode), ref, ...labels);
 }
+
+/** What comes before the ref in the names of the relations of a mode. */
+export const modePrefix = (mode) => settings.prefixes[mode] || mode[0].toUpperCase() + mode.slice(1);
+
+/** A stop as every title shows it, "VILLE Arret": its first, last and via stops alike. places: the names of its place, see routeLabel. */
+export const stopLabel = ({ name, official_name, places = [] }) => routeLabel(places, official_name ?? name);
+
+/** Title of a route relation, whatever writes it (a line generated, a network corrected, the "via" tool): "Bus 12: VILLE Arret → VILLE Arret → VILLE Arret", from the labels
+ * of its stops (stopLabel). Too long for OSM, without its vias. */
+export const tripTitle = (prefix, ref, from, to, vias = []) => routeTitle(prefix, ref, tripLabel(from, to, vias), tripLabel(from, to));
 
 /** The same, with what comes before the ref. */
 export function routeTitle(prefix, ref, ...labels) {

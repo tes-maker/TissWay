@@ -63,11 +63,9 @@ coordinates are often tens of metres off), else at the projection of the GTFS st
 - stops facing each other (projections within `stop_position_shared_m`) share one stop_position, and
   same-name stops on the same kerb are treated as one platform (aggregated feeds list the same platform
   under several networks);
-- new stop_positions only carry `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`), `name`
-  and, on a two-way way, `direction=forward|backward` (direction of travel relative to the way, removed
-  when the stop_position is shared by both directions). They are shared by every route on that way,
-  whatever its network. An existing stop_position keeps its tags (`direction`…): only the missing ones are added, except `name`, replaced by the GTFS
-  name like on the platform.
+- a stop_position only carries `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`, and `coach=yes` for coaches) and `name`, the name of the stop. What an existing one has
+  more goes to its platform when the platform lacks it (`shelter`, `bench`…; its `ref` and ids only if it serves a single stop), and `direction` and `highway=bus_stop` are dropped. What
+  describes something else on the node stays: `highway=traffic_signals`, `crossing`, `barrier`, `note`… A stop_position is shared by every route on that way, whatever its network.
 
 ### Correcting a whole network
 
@@ -75,9 +73,11 @@ At the bottom of Settings, once a feed is loaded, **Correct a whole network** pu
 and reads the stops and relations from OSM, the GTFS giving the networks and their area.
 
 - **Stops** of its route relations: `name` without the town, `official_name` with it, punctuation, no `bus=yes` on platforms, a missing `public_transport=platform`, or `highway` on a line on the road, GTFS ids and
-  numbered network tags tidied. Opposite stops of one name (within 200 m) get the same `official_name`. A stop_position only gets `name`.
+  numbered network tags tidied. Opposite stops of one name (within 200 m) get the same `official_name`. 
 - **Route and route_master relations**: `name`, `from`, `to`, `via`. The start of a name stays as it is (`Car Nomad 224:`), unless it was changed in Settings; stops told apart in a title stay.
-- **Never changed**: ways, members, refs, positions. What is already right stays out of the file, so that it can be run again.
+- **Stop_position and platform mixed up**: a stop_position keeps only its vehicle and `name`, the rest going to its platform. An object whose tag and role disagree, or without a tag, is judged by
+  where it stands: on the road a stop_position, beside it a platform. Its tag and its role in the relations are put right.
+- **Never changed**: ways, the order of the members, positions. What is already right stays out of the file, so that it can be run again.
 
 It is a mass edit: follow the [Automated Edits code of conduct](https://wiki.openstreetmap.org/wiki/Automated_Edits_code_of_conduct) before uploading the file.
 
@@ -156,7 +156,7 @@ With the "Split roundabouts" setting off, roundabouts (`junction=roundabout` /
 
 Titles are written automatically: routes `Bus <ref>: VILLE Arret → VILLE Arret`, route masters `Bus <ref>: VILLE Arret ↔ VILLE Arret` (the two termini most
 trips use); the prefix follows the mode (`Coach`, `Trolleybus`…) and can be changed for each mode on the Settings page (`Car Nomad 12: …`). The town comes from Nominatim, in capitals and without accents, and a
-town the stop name says already is moved first, never written twice. Variants sharing their termini read `A → X → Y → B`, and get `via=X;Y`.
+town the stop name says already is moved first, never written twice. Variants sharing their termini read `VILLE A → VILLE X → VILLE Y → VILLE B`, and get `via=X;Y`, the names of the platforms. Every title comes from one function (`stopLabel`, `tripTitle` in `naming.js`): a line generated, a network corrected, the "via" tool.
 
 **Communes nouvelles (France).** The town is the commune nouvelle, and a former commune a name says stays in the name of the stop: `Brouay Mairie` in Thue et Mue gives `name=Brouay Mairie`,
 `official_name=THUE ET MUE - Brouay Mairie`, and the title `THUE ET MUE Brouay Mairie`. In capitals too, once the Découpage administratif API confirms a commune déléguée of this commune:
@@ -181,9 +181,7 @@ They follow the OSM wiki's [Public transport](https://wiki.openstreetmap.org/wik
   no `bus=yes` (an existing one is removed, unless the platform also serves another mode),
   `name`, network, `gtfs:stop_id`, `gtfs:stop_name`, `gtfs:stop_code` (only when no ref holds that code), `ref` (stop_code, or the code of a NeTEx-style stop_id when OSM
   platforms already follow this), `local_ref` (platform_code), `wheelchair`. An existing `route_ref` gets the line.
-- **stop_position**: `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`), `name`, `direction=forward|backward` on a two-way
-  way (not at its ends; removed if served both ways). An existing stop_position keeps its tags: only the missing ones are added, except
-  `name`, the same as the platform's.
+- **stop_position**: only `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`, and `coach=yes` for coaches) and `name`, see above.
 
 The network tags are `network`, `network:wikidata` and `network:wikipedia`, found in the existing OSM relations of the lines, else on
 Wikidata when a single entry is confirmed. On a platform shared with another network, they get the same number as `network`

@@ -236,6 +236,20 @@ test("stops named without their town, official_name on the platforms; the title 
   assert.deepEqual(tagged("stop", "name"), ["Alpha", "Bravo", "Charlie"]);
 });
 
+test("variants sharing their termini: the vias of the title say their town too, the via tag the name of the platform", async () => {
+  town = "Fleury-sur-Orne";
+  settings.update_existing = false;
+  const zip = { ...GTFS, "trips.txt": "route_id,service_id,trip_id,direction_id,shape_id\nR1,S,t1,0,sh1\nR1,S,t2,0,sh1\n",
+    "stops.txt": `${GTFS["stops.txt"]}D,Delta,49.0009,1.00015\n`,
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\nt1,A,1\nt1,B,2\nt1,C,3\nt2,A,1\nt2,D,2\nt2,C,3\n" };
+  const { state } = await runRoutes(await Feed.open(makeZip(zip)), { network: "Bustown", ref: "R1" });
+  const names = [...state.obj.modified.values()].filter((o) => o.tags?.type === "route" && o.tags.name).map((o) => [o.tags.name, o.tags.via]).sort();
+  assert.deepEqual(names, [
+    ["Bus 1: FLEURY-SUR-ORNE Alpha → FLEURY-SUR-ORNE Bravo → FLEURY-SUR-ORNE Charlie", "Bravo"],
+    ["Bus 1: FLEURY-SUR-ORNE Alpha → FLEURY-SUR-ORNE Delta → FLEURY-SUR-ORNE Charlie", "Delta"],
+  ]);
+});
+
 test("several shapes for a variant: separated by ;, and the feed's other route_ids stay on the route_master", async () => {
   settings.feed = "FR-X";
   const zip = { ...GTFS, "trips.txt": "route_id,service_id,trip_id,direction_id,shape_id\nR1,S,t1,0,sh1\nR1,S,t2,0,sh2\n",

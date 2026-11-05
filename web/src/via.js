@@ -1,16 +1,15 @@
 // Tell apart the route relations sharing the same termini in a .osm file (JOSM): the via tag, and the same stops in the title,
-// "Bus 117: FLERS Gare → Les Landes → Les Vallées → CAEN Gare Routière".
+// "Bus 117: FLERS Gare → FLERS Les Landes → VIRE Les Vallées → CAEN Gare Routière", as every title (naming.stopLabel).
 //
 // Relations are grouped by name, without any via already present, so it can be run again. In each group of several relations, each
 // one gets as few stops as possible, taken from its intermediate stops (platforms), that set it apart from the others. A relation
 // whose stops are all served by another one keeps its name without via: the other relation gets the extra stops.
 //
-// Two platforms of the same name more than HOMONYM_M apart are different stops; their town is then shown ("LAIZE-LA-VILLE
-// Mairie"), from Nominatim.
+// Two platforms of the same name more than HOMONYM_M apart are different stops. The town of a stop comes from Nominatim.
 
 import { dist } from "./geo.js";
 import { lookup } from "./lookup.js";
-import { routeLabel, tripLabel } from "./naming.js";
+import { stopLabel, tripLabel } from "./naming.js";
 import { parseXml, serializeXml } from "./osm.js";
 import { counter, maxBy } from "./util.js";
 
@@ -99,14 +98,16 @@ export async function addVias(root, prefix = "") {
   for (const [base, { parts, rels }] of groups) {
     if (rels.length < 2) continue; // name already unique: any "via" is kept
     // "name<SEP>n": the n-th place of the group with this name, more than HOMONYM_M from the others
-    const places = new Map();
+    const places = new Map(), officials = new Map();
     const key = (name, ref) => {
       const pos = positionOf(ref, byRef);
       if (!places.has(name)) places.set(name, []);
       const list = places.get(name);
       let i = pos ? list.findIndex((p) => dist(p, pos) <= HOMONYM_M) : 0;
-      if (i < 0 || !list.length) i = list.push(pos ?? [0, 0]) - 1;
-      return `${name}${SEP}${i}`;
+      if (i < 0 || !list.length) i = list.push(pos ?? null) - 1;
+      const k = `${name}${SEP}${i}`;
+      officials.set(k, objs.get(ref).official_name);
+      return k;
     };
     const stops = rels.map((r) => routeStops(r, objs, key));
     if (stops.includes(null)) {
@@ -118,9 +119,8 @@ export async function addVias(root, prefix = "") {
     for (const [i, rel] of rels.entries()) {
       const labels = await Promise.all(vias[i].map(async (k) => {
         const [name, place] = k.split(SEP);
-        if (places.get(name).length < 2) return name;
-        const [lat, lon] = places.get(name)[Number(place)];
-        return routeLabel(await lookup.placesAt(lat, lon), name);
+        const pos = places.get(name)[Number(place)];
+        return stopLabel({ name, official_name: officials.get(k), places: pos ? await lookup.placesAt(pos[0], pos[1]) : [] });
       }));
       const name = `${parts[0]}${tripLabel(parts[1], parts[2], labels)}`;
       finalNames.push(name);

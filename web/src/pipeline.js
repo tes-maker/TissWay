@@ -19,7 +19,7 @@ import { lineVariants, refSortKey, stopSequences } from "./gtfs.js";
 import { matchVariant } from "./matching.js";
 import { keepTraces, terminusRoads } from "./reuse.js";
 import { lookup } from "./lookup.js";
-import { accentsFrom, agencyNetworks, cleanStopName, fixAccents, nameKey, routeLabel, slug, stopNames, words } from "./naming.js";
+import { accentsFrom, agencyNetworks, cleanStopName, fixAccents, nameKey, slug, stopLabel, stopNames, words } from "./naming.js";
 import { services, valhallaReady } from "./net.js";
 import { Store, completeWayNodes, platformsIn, readWays, routesIn, writeOsm } from "./osm.js";
 import { filterRoadPlatforms, nameNumberedNetworkTags, networkKeyFor, tagPlatforms } from "./platforms.js";
@@ -249,24 +249,18 @@ async function prepareStops(feed, { allStops }, box, osmStops, detected) {
   return stops;
 }
 
-/** Final names of the stops (naming.stopNames), and the labels of the route names of the lines (naming.routeLabel). */
-async function nameStops(stops, used, trips, lang, onProgress) {
+/** Final names of the stops (naming.stopNames) and their labels in the titles of the lines (naming.stopLabel). */
+async function nameStops(stops, used, lang, onProgress) {
   if (settings.fix_accents) {
     onProgress("Spelling of the stop names…");
     await restoreAccents(stops, used, lang);
   }
-  const placesOf = (s) => lookup.placesAt(s.lat, s.lon, lang);
+  for (const s of stops.df.values()) s.label = s.stop_name;
   onProgress("Towns of the stops (Nominatim)…"); // with the opposite stops: the data of one may replace the other (platforms.fixSide)
   for (const id of new Set(used.flatMap((u) => [u, ...(stops.neighbours.get(u) || [])]))) {
-    const s = stops.df.get(id);
-    const { name, official_name } = await stopNames(await placesOf(s), s.stop_name, (place) => lookup.placeNear(place, s.lat, s.lon), lookup.isDelegated);
-    s.stop_name = name;
-    s.official_name = official_name;
-  }
-  for (const s of stops.df.values()) s.label = s.stop_name;
-  for (const id of new Set(trips.flatMap((t) => [t.stop_seq[0], t.stop_seq.at(-1)]))) {
-    const s = stops.df.get(id);
-    s.label = routeLabel(await placesOf(s), s.official_name ?? s.stop_name); // the town the name gave, which may not be the one of the position
+    const s = stops.df.get(id), places = await lookup.placesAt(s.lat, s.lon, lang);
+    const { name, official_name } = await stopNames(places, s.stop_name, (place) => lookup.placeNear(place, s.lat, s.lon), lookup.isDelegated);
+    Object.assign(s, { stop_name: name, official_name, label: stopLabel({ name, official_name, places }) });
   }
 }
 
@@ -327,7 +321,7 @@ export async function runRoutes(feed, { network = null, ref = null, onProgress =
   const box = bbox(used.map((id) => latlon(known.get(id))), PAD_M);
   const osmStops = await platformsIn(box);
   const stops = await prepareStops(feed, selection, box, osmStops, detected);
-  await nameStops(stops, used, trips, lang, onProgress);
+  await nameStops(stops, used, lang, onProgress);
 
   const { existing, networks } = await readExisting({ feed, allNetworks, routes, agency, box, country, lang, detected, onProgress });
 

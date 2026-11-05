@@ -302,3 +302,15 @@ test("a complete relation with a stop across, each stop_position being nearer it
   const { summary } = await line(ABC, [["D", "Delta", 3, 0.99985]]);
   assert.equal(summary["complete relations"], 1);
 });
+
+test("a complete relation: its stop_positions are cleaned, its trace stays, what they had goes to the platforms", async () => {
+  correctLine();
+  Object.assign(world.elements[2].tags, { highway: "bus_stop", shelter: "yes", ref: "X", direction: "forward" });
+  const { obj, summary, ways } = await line(ABC);
+  assert.equal(summary["complete relations"], 1);
+  assert.deepEqual(ways, ["w1", "w2"]);
+  assert.deepEqual(obj.get("n2").tags, { public_transport: "stop_position", bus: "yes", name: "Bravo" });
+  assert.equal(obj.get("n101").tags.shelter, "yes");
+  assert.deepEqual([...obj.modified.keys()].filter((k) => k[0] === "w"), []);
+});
+

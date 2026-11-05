@@ -213,6 +213,16 @@ test("stopNames after cleaning: capitals with digits, then a separator, are stil
   assert.deepEqual(await naming.stopNames("Lisieux", name, async () => true), { name: "le bourg", official_name: "COURTONNE LES 2 EGLISES - le bourg" });
 });
 
+test("every title: VILLE Arret for the termini and the vias", () => {
+  const label = (name, official_name, places = []) => naming.stopLabel({ name, official_name, places });
+  assert.equal(label("Brouay Mairie", "THUE ET MUE - Brouay Mairie"), "THUE ET MUE Brouay Mairie");
+  assert.equal(label("Mairie", undefined, ["Caen"]), "CAEN Mairie");
+  assert.equal(label("Mairie"), "Mairie");
+  assert.equal(naming.tripTitle("Bus", "12", "CAEN Gare", "VIRE Gare", ["CAEN Mairie", "FLERS Mairie"]), "Bus 12: CAEN Gare → CAEN Mairie → FLERS Mairie → VIRE Gare");
+  assert.equal(naming.tripTitle("Bus", "12", "A", "B"), "Bus 12: A → B");
+  assert.equal(naming.tripTitle("Bus", "12", "A", "B", ["V".repeat(300)]), "Bus 12: A → B"); // too long for OSM: without its vias
+});
+
 test("the start of the names follows the settings, empty being the default", () => {
   configure({ "prefixes.coach": "Car Nomad", "prefixes.bus": "" });
   assert.equal(naming.routeName("coach", "12", "A → B"), "Car Nomad 12: A → B");
