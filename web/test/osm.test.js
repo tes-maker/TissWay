@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import "./helpers.js";
-import { Store, cleanGtfsId, cleanGtfsIds, fromOverpass, parseXml, writeOsm } from "../src/osm.js";
+import { Store, changesOsm, cleanGtfsId, cleanGtfsIds, fromOverpass, parseXml, writeOsm } from "../src/osm.js";
 import { enrich } from "../src/platforms.js";
 import { reviewRefs } from "../src/ref_review.js";
 import { nearestPairs, feedTags } from "../src/platform_tags.js";
@@ -207,4 +207,37 @@ test("GTFS ids are corrected when OSM is read, and the object flagged", () => {
   assert.equal(read.r1.correctedIds, true);
   assert.equal(read.r2.correctedIds, undefined);
   assert.equal(read.n3.correctedIds, undefined);
+});
+
+test("action=modify only on what differs from OSM", () => {
+  const shared = { public_transport: "platform", name: "Gare", network: "Twisto;Nomad", operator: "RATP Dev;Keolis", "network:wikidata": "Q1;Q2" };
+  const relation = { version: "4", members: [["n1", "platform"]], tags: { type: "route", name: "Bus 1" } };
+  const obj = new Store({
+    n1: { version: "1", lat: 49, lon: 1, tags: shared },
+    n2: { version: "1", lat: 49, lon: 1, tags: { name: "A" } },
+    n3: { version: "1", lat: 49, lon: 1, tags: { name: "B" } },
+    n4: { version: "1", lat: 49, lon: 1, tags: { name: "C" }, correctedIds: true },
+    w1: { version: "1", tags: { highway: "residential" }, nodes: ["n2", "n3"] },
+    w2: { version: "1", tags: { highway: "residential" }, nodes: ["n2", "n3"] },
+  });
+  obj.set("n1", { ...obj.get("n1"), tags: { ...shared, network: "Twisto", "network:2": "Nomad", operator: "RATP Dev", "operator:Nomad": "Keolis", "network:wikidata": "Q1", "network:wikidata:Nomad": "Q2" } }); // the same once written
+  obj.edit("n2"); // edited, back to the same
+  obj.edit("n3").tags.name = "B2";
+  obj.edit("n4");
+  obj.edit("w1");
+  obj.edit("w2").nodes.reverse();
+  obj.set("n-1", { lat: 49, lon: 1, tags: {} });
+  obj.update("r1", relation, { ...structuredClone(relation) });
+  obj.update("r2", relation, { ...structuredClone(relation), id: "2", tags: { ...relation.tags, name: "Bus 2" } });
+  obj.update("r3", relation, { ...structuredClone(relation), members: [["n1", "stop"]] });
+  const actions = Object.fromEntries(parseXml(writeOsm(obj)).children.map((e) => [`${e.name[0]}${e.attrs.id}`, e.attrs.action]));
+  assert.deepEqual(actions, { "n-1": "modify", n1: undefined, n2: undefined, n3: "modify", n4: "modify", w1: undefined, w2: "modify", r1: undefined, r2: "modify", r3: "modify" });
+});
+
+test("a file without any difference with OSM changes nothing", () => {
+  const obj = new Store({ n1: { version: "1", lat: 49, lon: 1, tags: { name: "A" } } });
+  obj.edit("n1");
+  assert.equal(changesOsm(obj), false);
+  obj.edit("n1").tags.name = "B";
+  assert.equal(changesOsm(obj), true);
 });

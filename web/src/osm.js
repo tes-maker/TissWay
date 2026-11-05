@@ -25,6 +25,18 @@ export class Store {
   constructor(base = {}, modified = {}) {
     this.base = new Map(Object.entries(base));
     this.modified = new Map(Object.entries(modified));
+    this.originals = new Map(); // what OSM has of objects read apart from the base (existing relations)
+  }
+
+  /** The object of OSM that key was read as, undefined for a new one. */
+  original(key) {
+    return this.originals.get(key) ?? this.base.get(key);
+  }
+
+  /** New value of an object read apart from the base: original is what OSM has, to tell whether anything changed. */
+  update(key, original, value) {
+    this.originals.set(key, original);
+    this.modified.set(key, value);
   }
 
   get(key) {
@@ -239,7 +251,18 @@ function withoutSecondaryStopCodes(tags) {
 /** The tags of an object in a file. */
 const outputTags = (tags) => withoutSecondaryStopCodes(tags.public_transport === "platform" ? outputPlatformTags(tags) : tags);
 
-/** Modified objects (and the nodes of their ways) as a JOSM .osm file. */
+const sameList = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/** Does the object o, as a file writes it, differ from what OSM has (original)? A new object does, and one whose GTFS ids were corrected when read (see fromOverpass). */
+export function differsFromOsm(o, original) {
+  if (!original || original.correctedIds) return true;
+  return !sameTags(outputTags(o.tags ?? {}), original.tags ?? {}) || o.lat !== original.lat || o.lon !== original.lon || !sameList(o.nodes, original.nodes) || !sameList(o.members, original.members);
+}
+
+/** Does this file change anything in OSM? */
+export const changesOsm = (obj) => [...obj.modified].some(([key, o]) => differsFromOsm(o, obj.original(key)));
+
+/** Modified objects (and the nodes of their ways) as a JOSM .osm file. Only what differs from OSM is marked action="modify", the only objects JOSM uploads. */
 export function writeOsm(obj) {
   const keys = new Set(obj.modified.keys());
   for (const [key, o] of obj.modified) if (key[0] === "w") for (const n of o.nodes) keys.add(n);
@@ -252,7 +275,7 @@ export function writeOsm(obj) {
     const tags = outputTags(o.tags);
     let attrs = `id="${key.slice(1)}"`;
     if (o.version) attrs += ` version="${o.version}"`;
-    if (obj.modified.has(key) || !sameTags(tags, o.tags)) attrs += ' action="modify"'; // a node of a way whose tags change here has to be uploaded too
+    if (differsFromOsm(o, obj.original(key))) attrs += ' action="modify"'; // also a node of a way whose tags change here: it has to be uploaded too
     if (key[0] === "n") attrs += ` lat="${o.lat.toFixed(7)}" lon="${o.lon.toFixed(7)}"`;
     const body = [];
     for (const n of o.nodes || []) body.push(`    <nd ref="${n.slice(1)}" />`);

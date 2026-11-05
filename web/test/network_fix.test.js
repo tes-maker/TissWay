@@ -107,6 +107,14 @@ test("nothing of another network, and no way in the file", async () => {
   assert.ok(![...out.keys()].some((k) => k[0] === "w"));
 });
 
+test("a shared stop already in this form stays out of the file: nothing differs once written", async () => {
+  line();
+  answer.objects[2].tags = { public_transport: "platform", highway: "bus_stop", name: "Gare", official_name: "LISIEUX - Gare", network: "Nomad Car;Twisto", operator: "Keolis;RATP Dev" };
+  const { xml, summary } = await run();
+  assert.ok(!read(xml).has("n3"));
+  assert.equal(summary["corrected stops"], 2);
+});
+
 test("run again on what it wrote: nothing to correct", async () => {
   line();
   const first = read((await run()).xml);

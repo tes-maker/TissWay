@@ -8,13 +8,13 @@ import { networkFromOsm } from "./detect.js";
 import { bbox, dist, latlon } from "./geo.js";
 import { lookup } from "./lookup.js";
 import { agencyNetworks, cleanStopName, masterLabel, nameKey, routeTitle, slug, stopKey, stopLabel, stopNames, tripTitle } from "./naming.js";
-import { Store, completeWayNodes, onRoad, readObjects, routesIn, writeOsm } from "./osm.js";
+import { Store, changesOsm, completeWayNodes, differsFromOsm, onRoad, readObjects, routesIn, writeOsm } from "./osm.js";
 import { selectRoutes } from "./pipeline.js";
 import { networkStops } from "./platform_tags.js";
 import { chooseVias } from "./via.js";
 import { VEHICLE, dropBusTag, nameNumberedNetworkTags, nameNumberedRefs, stopPositionOnly, takeFromStopPosition } from "./platforms.js";
 import { settings } from "./settings.js";
-import { dedupe, listIn, log, sameTags } from "./util.js";
+import { dedupe, listIn, log } from "./util.js";
 
 const PAD_M = 300;
 const SAME_PLACE_M = 200; // the stops of one name this close are in one place: opposite stops get the same official_name, and Nominatim is asked once
@@ -179,7 +179,7 @@ export async function runNetworkFix(feed, { network, onProgress = () => {} }) {
   let nStops = 0, nKinds = 0;
   for (const [key, tags] of corrected) {
     const o = objects.get(key);
-    if (sameTags(tags, o.tags) && !o.correctedIds) continue;
+    if (!differsFromOsm({ ...o, tags }, o)) continue;
     if (o.tags.public_transport && o.tags.public_transport !== tags.public_transport) {
       nKinds++;
       log.info(`${key}: public_transport=${o.tags.public_transport} -> ${tags.public_transport}, from where it stands`);
@@ -203,9 +203,9 @@ export async function runNetworkFix(feed, { network, onProgress = () => {} }) {
   for (const route of routes) route[1] = { ...route[1], members: withRoles(route[1].members) };
 
   const set = (key, o, tags) => {
-    if (sameTags(tags, o.tags) && !o.correctedIds && JSON.stringify(o.members) === JSON.stringify(relations[key].members)) return false;
+    if (!differsFromOsm({ ...o, tags }, relations[key])) return false;
     if (tags.name !== o.tags.name) log.info(`${key}: ${o.tags.name ?? "(no name)"} -> ${tags.name}`);
-    obj.set(key, { ...o, tags });
+    obj.update(key, relations[key], { ...o, tags });
     return true;
   };
   const stopOf = (member) => names.get(member);
@@ -257,7 +257,7 @@ export async function runNetworkFix(feed, { network, onProgress = () => {} }) {
   }
   for (const [name, keys] of twins) if (keys.length > 1) log.warn(`same name on ${keys.join(", ")}: ${name} (to tell apart in JOSM, or with the "via" tool)`);
 
-  if (!obj.modified.size) throw new Error(`Nothing to correct: the ${roles.size} stops and ${routes.length} route relations of "${network}" are already in this form.`);
+  if (!changesOsm(obj)) throw new Error(`Nothing to correct: the ${roles.size} stops and ${routes.length} route relations of "${network}" are already in this form.`);
   await completeWayNodes(obj);
   log.info(`Network ${network}: ${nStops} of ${roles.size} stops corrected, ${nKinds} of them platform <-> stop_position, ${nRoles} role(s) put right, ${nRoutes} of ${routes.length} route relations and ${nMasters} route_masters corrected`);
   return { xml: writeOsm(obj), filename: `${slug(network)}_correction.osm`, summary: { "corrected stops": nStops, "corrected roles": nRoles, "corrected routes": nRoutes, "corrected route_masters": nMasters },
