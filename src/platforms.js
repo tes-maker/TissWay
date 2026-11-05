@@ -10,6 +10,8 @@
 // - otherwise an existing stop_position is reused when near the projection of the stop, unless closer to the
 //   projection of a rival across the road: on a two-way road both directions are often one way, and the
 //   stop_position of the opposite stop may be within reach (reusable);
+// - whatever the above, a stop_position closer to the stop across the road than to this stop is not reused, even on a good trace (closerToOpposite,
+//   settings.stop_position_own): it is left to that stop, and this stop gets its own;
 // - a new stop_position only carries public_transport=stop_position, <vehicle>=yes, name and, on a two-way way,
 //   direction=forward|backward. An existing one keeps its tags: only the missing ones are added, except name,
 //   replaced by the name of the stop. A direction set here is removed if it turns out to be served both ways;
@@ -80,6 +82,20 @@ function rivalPoints(obj, wayKeys, pos, target, rivals) {
   return points;
 }
 
+const OPPOSITE_MARGIN_M = 2; // along the road: stops this close face each other, and share their stop_position
+
+/** Is the stop_position at p closer to a stop across the road (opposites: positions) than to the stop at pos (settings.stop_position_own)? Compared along these ways,
+ * at the projections of the stops: a platform set back from the road must not lose to one on the kerb. A stop on the same side is the same platform for another network. */
+export function closerToOpposite(obj, wayKeys, p, pos, opposites) {
+  if (!settings.stop_position_own || !opposites.length) return false;
+  const th = settings.thresholds, own = dist(p, nearestOn(obj, wayKeys, pos)[1]);
+  return opposites.some((r) => {
+    if (dist(r, pos) <= th.duplicate_stop_m) return false;
+    const [d, point, seg] = nearestOn(obj, wayKeys, r);
+    return d <= th.stop_position_m && rightOf(r, ...seg) !== rightOf(pos, ...seg) && dist(p, point) < own - OPPOSITE_MARGIN_M;
+  });
+}
+
 /** [way index, node, position] of the existing stop_positions on this run of ways. */
 function* stopPositionsOn(obj, ways, run, vehicle) {
   for (const j of run) {
@@ -107,11 +123,12 @@ function inReach(obj, n, p, pos, target, terminus) {
 /** [way index, node] of the existing stop_position to reuse for a stop at pos whose projection is target, or null.
  * Within stop_position_shared_m of target it is always reused. Further, up to stop_position_reuse_m, it is left to a
  * rival across the road whose projection is closer to it: a new stop_position is then created in front of this stop. */
-function reusable(obj, ways, run, pos, target, rivals, vehicle, terminus) {
+function reusable(obj, ways, run, pos, target, rivals, vehicle, terminus, opposites) {
   const th = settings.thresholds, found = [];
   let points = null; // computed only when needed
   for (const [j, n, p] of stopPositionsOn(obj, ways, run, vehicle)) {
     if (!inReach(obj, n, p, pos, target, terminus)) continue;
+    if (closerToOpposite(obj, run.map((k) => ways[k]), p, pos, opposites)) continue;
     const d = dist(p, target);
     if (d > th.stop_position_shared_m) {
       points ??= rivalPoints(obj, run.map((k) => ways[k]), pos, target, rivals);
@@ -125,10 +142,11 @@ function reusable(obj, ways, run, pos, target, rivals, vehicle, terminus) {
 /** [way index, node] of the existing stop_position nearest to the platform at pos (within stop_position_reuse_m of its
  * projection target), or null. One clearly closer to the platform of a rival stop (rivals: positions of OSM platforms)
  * is left to it. */
-function nearestToPlatform(obj, ways, run, pos, target, rivals, vehicle, terminus) {
+function nearestToPlatform(obj, ways, run, pos, target, rivals, vehicle, terminus, opposites) {
   const th = settings.thresholds, found = [];
   for (const [j, n, p] of stopPositionsOn(obj, ways, run, vehicle)) {
     if (!inReach(obj, n, p, pos, target, terminus)) continue;
+    if (closerToOpposite(obj, run.map((k) => ways[k]), p, pos, opposites)) continue;
     const d = dist(p, pos);
     if (!rivals.some((r) => dist(p, r) < d - th.stop_position_shared_m)) found.push([d, j, n]);
   }
@@ -138,8 +156,9 @@ function nearestToPlatform(obj, ways, run, pos, target, rivals, vehicle, terminu
 /** Spot of the stop_position of a GTFS stop at pos on the first run of ways, from ways[start], passing within max_m
  * (default stop_position_m) of it, or null. Nothing is changed (see materialize). rivals: positions of the GTFS stops
  * that may own an existing stop_position nearby. platform: pos is the OSM platform used, rivals the OSM platforms of
- * the rival stops. terminus: for the first or last stop, see fitsTerminus; the reach is then terminus_m. */
-export function locateStop(obj, ways, pos, { start = 0, max_m = null, rivals = [], vehicle = "bus", platform = false, terminus = null } = {}) {
+ * the rival stops. terminus: for the first or last stop, see fitsTerminus; the reach is then terminus_m. opposites: positions of the stops closerToOpposite compares with,
+ * by default the rivals. */
+export function locateStop(obj, ways, pos, { start = 0, max_m = null, rivals = [], vehicle = "bus", platform = false, terminus = null, opposites = rivals } = {}) {
   const limit = max_m ?? (terminus ? settings.thresholds.terminus_m : settings.thresholds.stop_position_m);
   let best = null;
   const run = [];
@@ -161,7 +180,7 @@ export function locateStop(obj, ways, pos, { start = 0, max_m = null, rivals = [
   const nodes = obj.get(ways[i]).nodes;
   const pa = latlon(obj.get(nodes[k])), pb = latlon(obj.get(nodes[k + 1]));
   const target = interpolate(pa, pb, t);
-  const reuse = (platform ? nearestToPlatform : reusable)(obj, ways, run, pos, target, rivals, vehicle, terminus);
+  const reuse = (platform ? nearestToPlatform : reusable)(obj, ways, run, pos, target, rivals, vehicle, terminus, opposites);
   if (reuse) return makeSpot(reuse[0], latlon(obj.get(reuse[1])), d, { node: reuse[1] });
   const length = dist(pa, pb);
   t = length > 2 ? Math.min(Math.max(t, 1 / length), 1 - 1 / length) : 0.5; // not on top of an existing node

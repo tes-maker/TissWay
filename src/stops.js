@@ -33,6 +33,14 @@ export class Stops {
     this.rivals = rivals; // stop_id -> neighbours + same-name stops nearby
   }
 
+  /** Positions of the stops a stop_position of this stop is compared with: the OSM platforms of its rivals, other than the one it uses, else their GTFS position. */
+  opposites(stopId, platform = null) {
+    return (this.rivals.get(stopId) || []).flatMap((r) => {
+      const theirs = (this.platforms.get(r) || []).filter((c) => c.id !== platform).map((c) => c.pos);
+      return theirs.length ? theirs : [latlon(this.df.get(r))];
+    });
+  }
+
   positions(ids) {
     return ids.map((s) => latlon(this.df.get(s)));
   }

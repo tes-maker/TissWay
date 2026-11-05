@@ -118,8 +118,6 @@ const reuseCases = [
   ["face-to-face stops share the stop_position", 49.0004, "r2", [49.0004, EAST], { rivals: [[49.0004, WEST]] }, "nSP"],
   ["rival at the same place is the same platform", 49.00065, "r3", [49.0004, EAST], { rivals: [[49.00041, EAST]] }, "nSP"],
   ["rival on the same side shares the stop_position", 49.00065, "r3", [49.0004, EAST], { rivals: [[49.00065, EAST]] }, "nSP"],
-  ["stop_position a few metres away is shared even with a rival in front", 49.00048, "r2", [49.0004, EAST], { rivals: [[49.00048, WEST]] }, "nSP"],
-  ["nearly face-to-face stops keep the existing stop_position", 49.000508, "r3", [49.0004, EAST], { rivals: [[49.00047, WEST]] }, "nSP"],
   ["rival on another road is ignored", 49.00065, "r3", [49.0004, EAST], { rivals: [[49.00065, 1.002]] }, "nSP"],
   ["stop_position too far along the way is not reused", 49.00072, "r3", [49.0004, EAST], {}, null],
 ];
@@ -552,4 +550,37 @@ test("enrich: the name of an OSM platform saying its town is corrected, official
   const { tags } = obj.get("n1");
   assert.deepEqual([tags.name, tags.official_name], ["Charlotte Corday", "MONDEVILLE - Charlotte Corday"]);
   assert.equal(tags["official_name:2"], undefined);
+});
+
+// --- a stop_position closer to the opposite stop (stop_position_own)
+
+for (const [what, lat, after, pos, rival, own, off] of [
+  ["a few metres away, in front of the rival", 49.00048, "r2", [49.0004, EAST], [49.00048, WEST], null, "nSP"],
+  ["nearly face to face, closer to the rival", 49.000508, "r3", [49.0004, EAST], [49.00047, WEST], null, "nSP"],
+  ["in front of this stop, the rival further on", 49.0004, "r2", [49.0004, EAST], [49.0006, WEST], "nSP", "nSP"],
+  ["stops facing each other share it", 49.0005, "r3", [49.0004, EAST], [49.0004, WEST], "nSP", "nSP"],
+  ["within 2 m along the road", 49.00044, "r2", [49.0004, EAST], [49.00041, WEST], "nSP", "nSP"],
+  ["a stop on the same side is not opposite", 49.00048, "r2", [49.0004, EAST], [49.00048, EAST], "nSP", "nSP"],
+  ["a stop on another road is not opposite", 49.00048, "r2", [49.0004, EAST], [49.00048, 1.002], "nSP", "nSP"],
+]) {
+  test(`stop_position_own: ${what}`, () => {
+    const objs = () => withStopPosition(street(), "nSP", lat, after);
+    assert.equal(locateStop(objs(), ["wR"], pos, { rivals: [rival] }).node, own);
+    assert.equal(locateStop(objs(), ["wR"], pos, { platform: true, opposites: [rival] }).node, own);
+    settings.stop_position_own = false;
+    assert.equal(locateStop(objs(), ["wR"], pos, { rivals: [rival] }).node, off);
+    settings.stop_position_own = true;
+  });
+}
+
+test("stop_position_own: a platform set back from the road does not lose to one on the kerb", () => {
+  const obj = withStopPosition(street(), "nSP", 49.0004, "r2");
+  assert.equal(locateStop(obj, ["wR"], [49.0004, 1.0005], { rivals: [[49.0004, 0.99995]] }).node, "nSP");
+});
+
+test("stop_position_own: on by default, the new one stands in front of this stop", () => {
+  assert.equal(settings.stop_position_own, true);
+  const spot = locateStop(withStopPosition(street(), "nSP", 49.00048, "r2"), ["wR"], [49.0004, EAST], { rivals: [[49.00048, WEST]] });
+  assert.equal(spot.node, null);
+  approx(spot.pos[0], 49.0004, 0.00002);
 });

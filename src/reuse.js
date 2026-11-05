@@ -8,7 +8,7 @@
 
 import { dist, latlon, project } from "./geo.js";
 import { Store, readWays, stopPositionsAround } from "./osm.js";
-import { VEHICLE, fitsTerminus, forward, isStopPositionFor, makeSpot, onKerb, sideSegment, stopSegment } from "./platforms.js";
+import { VEHICLE, closerToOpposite, fitsTerminus, forward, isStopPositionFor, makeSpot, onKerb, sideSegment, stopSegment } from "./platforms.js";
 import { settings } from "./settings.js";
 import { linkNode } from "./splitting.js";
 import { log, maxBy } from "./util.js";
@@ -69,8 +69,8 @@ function endsAt(ways, first, last, obj) {
 }
 
 /** [{stop, platform, way, pos}] for each stop of the variant, when the relation has nothing left to do, else null: a stop_position and a platform for each
- * GTFS stop, in order, each platform being one of the stop's, on the kerb side and not on the road, and a trace ending exactly at its first and last
- * stop_positions. The trace itself has been judged by traceProblem. */
+ * GTFS stop, in order, each platform being one of the stop's, on the kerb side and not on the road, each stop_position not closer to the stop across the road, and a trace
+ * ending exactly at its first and last stop_positions. The trace itself has been judged by traceProblem. */
 export function completeRelation(relation, v, stops, ways, obj, vehicle = "bus") {
   const ofRole = (role) => relation.members.filter(([, r]) => r.startsWith(role)).map(([ref]) => ref);
   const stopNodes = ofRole("stop"), platforms = ofRole("platform");
@@ -87,6 +87,10 @@ export function completeRelation(relation, v, stops, ways, obj, vehicle = "bus")
     if (at === ways.length) return null;
     const spot = makeSpot(at, latlon(obj.get(stopNodes[i])), 0, { node: stopNodes[i] });
     if (!onKerb(c.pos, stopSegment(obj, ways, spot), (p) => sideSegment(obj, ways, spot, p))) return null;
+    if (closerToOpposite(obj, ways.slice(Math.max(at - 1, 0), at + 2), spot.pos, c.pos, stops.opposites(id, c.id))) {
+      log.debug(`  ${stopNodes[i]} is closer to the stop across the road than to ${id}: this stop gets its own stop_position`);
+      return null;
+    }
     out.push({ stop: stopNodes[i], platform: c.id, way: at, pos: c.pos });
   }
   return out;

@@ -42,6 +42,7 @@ export const SCHEMA = [
     { key: "update_existing", label: "Update existing relations", type: "boolean", value: true, help: "Off: always create new relations, even when the line is already in OSM." },
     { key: "existing_min_similarity", label: "Minimum similarity with an existing relation", type: "number", unit: "0 to 1", value: 0.4, min: 0, max: 1, step: 0.05, help: "Below this, a variant is not paired with an existing relation." },
     { key: "reuse_traces", label: "Keep good traces", type: "boolean", value: true, help: "A relation of the line that can be travelled from end to end and serves the stops in order keeps its ways. Off: every trace is computed again." },
+    { key: "stop_position_own", label: "A stop_position closer to the opposite stop is not reused", type: "boolean", value: true, help: "Checked for every stop, even on a good trace or a relation with nothing else to do: compared along the road, a stop_position closer to the stop across the road is left to it, and this stop gets its own. Stops facing each other, within 2 m along the road, still share one. Off: only what is clearly the stop_position of the other stop is left to it." },
     { key: "split_roundabouts", label: "Split roundabouts", type: "boolean", value: true, help: "Off: relations contain the whole roundabout way." },
   ] },
   { group: "Distances", items: [
