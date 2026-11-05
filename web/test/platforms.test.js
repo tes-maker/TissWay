@@ -336,10 +336,23 @@ test("stop_id held by another OSM platform is not set", () => {
   assert.ok(!("gtfs:stop_id" in obj.get("nE").tags));
 });
 
-test("platform tags: the vehicle PTNA looks for, GTFS keys with the feed code", () => {
+test("enrich: bus=yes leaves a platform, unless it tells the bus apart from another mode", () => {
+  const after = (tags) => {
+    const obj = new Store({ n1: { lat: 49, lon: 0, tags: { public_transport: "platform", ...tags } } });
+    enrich(obj, "n1", { name: "Gare", network: "Twisto" });
+    return obj.get("n1").tags.bus;
+  };
+  assert.equal(after({ highway: "bus_stop", bus: "yes" }), undefined);
+  assert.equal(after({ highway: "platform", bus: "yes" }), undefined);
+  assert.equal(after({ highway: "bus_stop", bus: "yes", tram: "yes" }), "yes");
+  assert.equal(after({ railway: "platform", bus: "yes" }), "yes");
+  assert.equal(after({ highway: "bus_stop", bus: "no" }), "no");
+});
+
+test("platform tags: no bus=yes, GTFS keys with the feed code", () => {
   const stop = { stop_name: "Gare", stop_code: "12A" };
-  assert.equal(stopTags(stop, "S1", {}, "bus").bus, "yes");
-  assert.deepEqual([stopTags(stop, "S1", {}, "coach").bus, stopTags(stop, "S1", {}, "coach").coach], ["yes", "yes"]);
+  assert.equal(stopTags(stop, "S1", {}, "bus").bus, undefined);
+  assert.deepEqual([stopTags(stop, "S1", {}, "coach").bus, stopTags(stop, "S1", {}, "coach").coach], [undefined, "yes"]);
   assert.equal(stopTags(stop, "S1", {}, "trolleybus").trolleybus, "yes");
   assert.equal(stopTags(stop, "S1", {}).highway, "bus_stop");
   settings.feed = "FR-X";
@@ -531,4 +544,12 @@ test("stop served both ways without direction_id gets a platform per side", () =
   const [[rn, rs]] = build([variant("0", ["S", "M", "N"], "t1", ["wS", "wR", "wN"]), variant("0", ["N", "M", "S"], "t2", ["wN", "wR", "wS"])], stops, obj);
   const platform = (rel) => rel.members.filter(([, role]) => role === "platform")[1][0];
   assert.deepEqual([platform(rn), platform(rs)], ["nE", "nW"]);
+});
+
+test("enrich: the name of an OSM platform saying its town is corrected, official_name replaced", () => {
+  const obj = new Store({ n1: { lat: 49, lon: 0, tags: { public_transport: "platform", highway: "bus_stop", name: "MONDEVILLE - Charlotte Corday", official_name: "Corday" } } });
+  enrich(obj, "n1", { name: "Charlotte Corday", official_name: "MONDEVILLE - Charlotte Corday", network: "Twisto" });
+  const { tags } = obj.get("n1");
+  assert.deepEqual([tags.name, tags.official_name], ["Charlotte Corday", "MONDEVILLE - Charlotte Corday"]);
+  assert.equal(tags["official_name:2"], undefined);
 });

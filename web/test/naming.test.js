@@ -63,31 +63,130 @@ test("routeLabel: unknown town keeps the GTFS name, any name of the place counts
   assert.equal(naming.routeLabel(["Garcelles-Secqueville", "Le Castelet"], "Mairie"), "GARCELLES-SECQUEVILLE Mairie");
 });
 
-for (const [places, name, renamed] of [
-  ["Caen", "Gare", "CAEN - Gare"],
-  ["Caen", "Caen Gare", "CAEN - Gare"],
-  ["Caen", "CAEN - Gare", "CAEN - Gare"],
-  ["Caen", "Gare - Caen", "CAEN - Gare"],
-  ["Caen", "Gare (Caen)", "CAEN - Gare"],
-  ["Caen", "Gare, Caen", "CAEN - Gare"],
-  ["Caen", "Caen", "CAEN"],
-  ["Tilly-sur-Seulles", "TILLY-SUR - SEULLES - College", "TILLY-SUR-SEULLES - College"],
-  ["Fleury-sur-Orne", "Fleury Mairie", "FLEURY-SUR-ORNE - Mairie"],
-  ["Saint-Malo", "St-Malo Gare", "SAINT-MALO - Gare"],
-  ["Condé-sur-Noireau", "Condé-sur-Noireau Hôpital", "CONDE-SUR-NOIREAU - Hôpital"],
-  [["Garcelles-Secqueville", "Le Castelet"], "Le Castelet Mairie", "LE CASTELET - Mairie"],
-  ["Hérouville-Saint-Clair", "CAEN Chemin Vert", "CAEN Chemin Vert"], // another town: left alone
-  ["Gaillon", "Mairie Gaillon", "GAILLON - Mairie"],
-  ["Mondeville", "Hauts de Mondeville", "Hauts de Mondeville"], // it cannot be taken out: "Hauts de"
-  ["Saint-Manvieu-Norrey", "Norrey Calvaire", "Norrey Calvaire"],
-  [[], "Gare", "Gare"],
+for (const [places, given, name, official] of [
+  ["Mondeville", "Charlotte Corday", "Charlotte Corday", "MONDEVILLE - Charlotte Corday"],
+  ["Mondeville", "MONDEVILLE - Charlotte Corday", "Charlotte Corday", "MONDEVILLE - Charlotte Corday"],
+  ["Mondeville", "Mondeville Charlotte Corday", "Charlotte Corday", "MONDEVILLE - Charlotte Corday"],
+  ["Caen", "Gare - Caen", "Gare", "CAEN - Gare"],
+  ["Caen", "Gare (Caen)", "Gare", "CAEN - Gare"],
+  ["Caen", "Gare, Caen", "Gare", "CAEN - Gare"],
+  ["Tilly-sur-Seulles", "TILLY-SUR - SEULLES - College", "College", "TILLY-SUR-SEULLES - College"],
+  ["Fleury-sur-Orne", "Fleury Mairie", "Mairie", "FLEURY-SUR-ORNE - Mairie"],
+  ["Saint-Malo", "St-Malo Gare", "Gare", "SAINT-MALO - Gare"],
+  ["Condé-sur-Noireau", "Condé-sur-Noireau Hôpital", "Hôpital", "CONDE-SUR-NOIREAU - Hôpital"],
+  [["Garcelles-Secqueville", "Le Castelet"], "Le Castelet Mairie", "Mairie", "LE CASTELET - Mairie"],
+  ["Gaillon", "Mairie Gaillon", "Mairie", "GAILLON - Mairie"],
+  // only the town, or a town that cannot be taken out: official_name would say nothing more
+  ["Caen", "Caen", "Caen", undefined],
+  ["Mondeville", "Hauts de Mondeville", "Hauts de Mondeville", undefined],
+  ["Saint-Manvieu-Norrey", "Norrey Calvaire", "Norrey Calvaire", undefined],
+  [[], "Gare", "Gare", undefined],
 ]) {
-  test(`townedName: ${name} in ${places}`, () => {
-    const once = naming.townedName(places, name);
-    assert.equal(once, renamed);
-    assert.equal(naming.townedName(places, once), renamed); // run again on its result: no change
+  test(`stopNames: ${given} in ${places}`, async () => {
+    const names = await naming.stopNames(places, given);
+    assert.deepEqual(names, official ? { name, official_name: official } : { name });
+    if (official) assert.deepEqual(await naming.stopNames(places, official), names); // run again on its result: no change
   });
 }
+
+test("stopNames: capitals are taken out only when they name a place", async () => {
+  const isPlace = async (place) => ["CAEN", "MEZIDON-CANON"].includes(place);
+  assert.deepEqual(await naming.stopNames("Hérouville-Saint-Clair", "CAEN Chemin Vert", isPlace), { name: "Chemin Vert", official_name: "CAEN - Chemin Vert" });
+  assert.deepEqual(await naming.stopNames("Hérouville-Saint-Clair", "CAEN - Chemin Vert", isPlace), { name: "Chemin Vert", official_name: "CAEN - Chemin Vert" });
+  assert.deepEqual(await naming.stopNames("Saint-Pierre-en-Auge", "MEZIDON-CANON: college", isPlace), { name: "college", official_name: "MEZIDON-CANON - college" });
+  assert.deepEqual(await naming.stopNames("Caen", "CHU Côte de Nacre", isPlace), { name: "CHU Côte de Nacre" });
+  assert.deepEqual(await naming.stopNames("Hérouville-Saint-Clair", "CAEN Chemin Vert"), { name: "CAEN Chemin Vert" }); // nothing confirmed
+});
+
+test("stopKey: a stop is the same with or without the place before it", () => {
+  assert.equal(naming.stopKey("MONDEVILLE - Charlotte Corday"), naming.stopKey("Charlotte Corday"));
+  assert.notEqual(naming.stopKey("Gare Routière"), naming.stopKey("Gare"));
+});
+
+for (const [given, clean] of [
+  // parts of a name
+  ["Gare -Nord", "Gare - Nord"],
+  ["Gare- Nord", "Gare - Nord"],
+  ["Gare   -   Nord", "Gare - Nord"],
+  ["Gare -- Nord", "Gare - Nord"],
+  ["Gare - - Nord", "Gare - Nord"],
+  ["Gare – Nord", "Gare - Nord"],
+  ["Gare—Nord", "Gare - Nord"],
+  ["Gare : Nord", "Gare - Nord"],
+  ["Gare:Nord", "Gare - Nord"],
+  ["MEZIDON-CANON: college", "MEZIDON-CANON - college"],
+  // word hyphens
+  ["Saint-Malo", "Saint-Malo"],
+  ["Saint‑Malo", "Saint-Malo"],
+  ["Saint- Malo", "Saint-Malo"],
+  ["St -Lô", "St-Lô"],
+  ["St - Lô", "St - Lô"],
+  ["Condé-sur-Noireau - Hôpital", "Condé-sur-Noireau - Hôpital"],
+  // commas
+  ["Gare ,Nord", "Gare, Nord"],
+  ["Gare,Nord", "Gare, Nord"],
+  ["Gare , , Nord", "Gare, Nord"],
+  ["Gare, - Nord", "Gare - Nord"],
+  ["Gare;Nord", "Gare, Nord"],
+  // numbers
+  ["PK 1,5", "PK 1,5"],
+  ["Départ 12:30", "Départ 12:30"],
+  // brackets
+  ["Gare( Nord )", "Gare (Nord)"],
+  ["(Nord)Gare", "(Nord) Gare"],
+  ["Gare [ Quai 2 ]", "Gare [Quai 2]"],
+  ["Gare ()", "Gare"],
+  // apostrophes
+  ["L ' Église", "L'Église"],
+  ["Rue de l' Abbé", "Rue de l'Abbé"],
+  ["Hôtel d’ Assemblée", "Hôtel d’Assemblée"],
+  ["Jusqu ' au Port", "Jusqu'au Port"],
+  ["St James' Park", "St James' Park"],
+  // abbreviations
+  ["Av.de la Gare", "Av. de la Gare"],
+  ["Gare Av .", "Gare Av."],
+  ["S.N.C.F", "S.N.C.F"],
+  // slashes are left alone
+  ["PACY S/ EURE", "PACY S/ EURE"],
+  ["Mairie/Eglise", "Mairie/Eglise"],
+  // ends, spaces, encodings
+  ["  Gare  Nord  ", "Gare Nord"],
+  ["- Gare -", "Gare"],
+  ["Gare,", "Gare"],
+  ["Gare - Nord", "Gare - Nord"],
+  ["Ga​re", "Gare"],
+  ["Hôpital", "Hôpital"],
+  ["---", "---"],
+]) {
+  test(`cleanStopName: ${JSON.stringify(given)}`, () => {
+    assert.equal(naming.cleanStopName(given), clean);
+    assert.equal(naming.cleanStopName(clean), clean); // run again on its result: no change
+  });
+}
+
+for (const [places, given, name, official] of [
+  ["Mondeville", "MONDEVILLE -Charlotte Corday", "Charlotte Corday", "MONDEVILLE - Charlotte Corday"],
+  ["Mondeville", "Mondeville– Charlotte Corday", "Charlotte Corday", "MONDEVILLE - Charlotte Corday"],
+  ["Mondeville", "Charlotte Corday ,Mondeville", "Charlotte Corday", "MONDEVILLE - Charlotte Corday"],
+  ["Mondeville", "MONDEVILLE,Charlotte Corday", "Charlotte Corday", "MONDEVILLE - Charlotte Corday"],
+  ["Mondeville", "MONDEVILLE ( Charlotte Corday )", "Charlotte Corday", "MONDEVILLE - Charlotte Corday"],
+  ["Mondeville", "Charlotte Corday( Mondeville )", "Charlotte Corday", "MONDEVILLE - Charlotte Corday"],
+  ["Mondeville", "Mondeville : Charlotte Corday", "Charlotte Corday", "MONDEVILLE - Charlotte Corday"],
+  ["Mondeville", "Charlotte  Corday -", "Charlotte Corday", undefined],
+  ["Mondeville", "MONDEVILLE -", "MONDEVILLE", undefined],
+]) {
+  test(`stopNames after cleaning: ${given}`, async () => {
+    const names = await naming.stopNames(places, naming.cleanStopName(given));
+    if (official) assert.deepEqual(names, { name, official_name: official });
+    else assert.equal(names.name, name);
+  });
+}
+
+test("stopNames after cleaning: capitals with digits, then a separator, are still a place", async () => {
+  const name = naming.cleanStopName("COURTONNE LES 2 EGLISES: le bourg");
+  assert.equal(naming.routeLabel("Lisieux", name), "COURTONNE LES 2 EGLISES le bourg");
+  assert.deepEqual(await naming.stopNames("Lisieux", name, async () => true), { name: "le bourg", official_name: "COURTONNE LES 2 EGLISES - le bourg" });
+});
 
 test("the start of the names follows the settings, empty being the default", () => {
   configure({ "prefixes.coach": "Car Nomad", "prefixes.bus": "" });

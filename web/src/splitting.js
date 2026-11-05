@@ -158,7 +158,8 @@ function rewriteMembers(rel, splits, routePassages) {
  * existing OSM relations containing them. Returns [split ways, of which closed ways, existing relations updated]. */
 export async function splitWays(obj, parentRelations = readParents) {
   const routes = [...obj.modified].filter(([k, o]) => k[0] === "r" && o.tags.type === "route").map(([k]) => k);
-  const splits = planSplits(obj, cutNodes(obj, routes));
+  // a complete relation asks for no cut (see reuse.completeRelation); it still gets the parts of a way another route splits
+  const splits = planSplits(obj, cutNodes(obj, routes.filter((k) => !obj.get(k).complete)));
   if (!splits.size) return [0, 0, 0];
 
   const parents = await parentRelations([...splits.keys()]);

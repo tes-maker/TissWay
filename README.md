@@ -67,6 +67,33 @@ coordinates are often tens of metres off), else at the projection of the GTFS st
   whatever its network. An existing stop_position keeps its tags (`direction`…): only the missing ones are added, except `name`, replaced by the GTFS
   name like on the platform.
 
+### Correcting a whole network
+
+At the bottom of Settings, once a feed is loaded, **Correct a whole network** puts what is already mapped in OSM for a network in the form of this site, after a warning. It only gives a file to review in JOSM,
+and reads the stops and relations from OSM, the GTFS giving the networks and their area.
+
+- **Stops** of its route relations: `name` without the town, `official_name` with it, punctuation, no `bus=yes` on platforms, a missing `public_transport=platform`, or `highway` on a line on the road, GTFS ids and
+  numbered network tags tidied. Opposite stops of one name (within 200 m) get the same `official_name`. A stop_position only gets `name`.
+- **Route and route_master relations**: `name`, `from`, `to`, `via`. The start of a name stays as it is (`Car Nomad 224:`), unless it was changed in Settings; stops told apart in a title stay.
+- **Never changed**: ways, members, refs, positions. What is already right stays out of the file, so that it can be run again.
+
+It is a mass edit: follow the [Automated Edits code of conduct](https://wiki.openstreetmap.org/wiki/Automated_Edits_code_of_conduct) before uploading the file.
+
+### GTFS ids repeating their prefix
+
+Some OSM objects carry ids such as `gtfs:shape_id:FR-NOR-Atoumod=NOMAD:NOMAD:2686$1072220$1618`, while the feed says `NOMAD:2686$1072220$1618`. The first part, when repeated at
+the start of a `gtfs:shape_id`, `gtfs:trip_id`, `gtfs:route_id` or `gtfs:stop_id`, is corrected as soon as OSM is read, so these objects are recognised by their id. Those of the
+lines converted go in the file corrected, even a relation of the line that no variant uses. An id the feed itself writes that way stays as the feed says.
+
+### Ends of a line
+
+- A stop_position of the first or last stop is looked for within `terminus_m` (80 m, set apart from the other distances), also on the road just beyond the trace.
+  Beyond the usual reach, it must have the name of the stop or none, and be closer to this stop than to the next one. Otherwise a new one is created.
+- The trace stops exactly at these stop_positions: ways before the first or after the last are left out, and a way partly travelled is cut there.
+- A relation with nothing left to do keeps its trace as it is: same ways, none split for it, same stop_positions and platforms. It needs a stop_position and a
+  platform for each GTFS stop, in order, each platform being one of the stop's and on the kerb side, and a trace ending exactly at its first and last
+  stop_positions. Its tags are still completed. A way another line must split is still replaced by its parts.
+
 ### Platforms
 
 - The platform is picked on the kerb side of the way in the direction of travel. Prefer the OSM platform
@@ -133,7 +160,7 @@ On a stop shared by several networks, the first in priority holds `ref` and the 
 place of another network, lists what is left to check and lets you order the networks; the order is kept in the `stop_owners` setting. It also proposes the refs the GTFS shows to be obsolete,
 removed only when you ask, and lets you remove any ref of the platforms of the file by hand.
 
-Platforms, stop_positions and `from`/`to` keep the official GTFS name, unless you choose the `TOWN - Stop` form for stop names.
+Stops are named without their town, which goes in `official_name` on platforms: `name=Charlotte Corday`, `official_name=MONDEVILLE - Charlotte Corday`. A town already in a GTFS or OSM name is taken out. Stop_positions and `from`/`to` use the same `name`.
 
 ## Tags written
 
@@ -143,7 +170,8 @@ They follow the OSM wiki's [Public transport](https://wiki.openstreetmap.org/wik
   `public_transport:version=2`, the network tags, `colour`/`colour:text` (from Settings, else from the GTFS), `gtfs:route_id`, `gtfs:trip_id:sample`,
   `gtfs:shape_id` (when matched from the shape). Every `gtfs:*` key carries the `:<feed>` suffix when a feed code is known.
 - **route_master**: `type=route_master`, `route_master=<mode>`, `ref`, `name`, network, colours, `gtfs:route_id`.
-- **platform**: `public_transport=platform`, `highway=bus_stop` on a node (`highway=platform` on a way), `bus=yes` (or `trolleybus=yes`),
+- **platform**: `public_transport=platform`, `highway=bus_stop` on a node (`highway=platform` on a way), `trolleybus=yes` or `coach=yes` for these lines,
+  no `bus=yes` (an existing one is removed, unless the platform also serves another mode),
   `name`, network, `gtfs:stop_id`, `gtfs:stop_name`, `gtfs:stop_code` (only when no ref holds that code), `ref` (stop_code, or the code of a NeTEx-style stop_id when OSM
   platforms already follow this), `local_ref` (platform_code), `wheelchair`. An existing `route_ref` gets the line.
 - **stop_position**: `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`), `name`, `direction=forward|backward` on a two-way

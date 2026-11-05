@@ -19,6 +19,7 @@ npm test      # node --test, no install needed. Node >= 20.
 | Platforms | `.osm` completing the existing platforms of a network with its GTFS stops, and a CSV of the stops without a platform. |
 | PTNA list | The PTNA wiki page of a network, generated or updated from the current page. |
 | (drop an `.osm` file instead of a feed) | Adds "via …" to relations sharing a name in that file. |
+| (bottom of Settings) Correct a whole network | `.osm` putting the stops and relation names already mapped for a network in the form of this site, without changing a trace. |
 
 Nothing is ever uploaded to OSM: the file goes through a human, in JOSM.
 
@@ -35,7 +36,7 @@ for this run":
 | Tags holding the stop_id (`ref:FR:Atoumod`) | `ref:*` tags of nearby platforms whose values are mostly GTFS stop_ids. |
 | Platform `ref` from a NeTEx stop_id | On when at least 3 nearby platforms already follow this. |
 | Driving side | Country of the stops (Nominatim), then its driving side (Wikidata). |
-| Town of the termini, for the titles, or of every stop when renaming them | Nominatim, in the language of the feed. |
+| Town of every stop, for `official_name` and the titles | Nominatim, in the language of the feed. |
 | Accents | The spelling of OSM platforms of the same name, else Wiktionary (see limits below). |
 
 Any of this can be overridden on the Settings page. A service that fails is reported in the log and the run goes on without it.
@@ -53,7 +54,7 @@ and GTFS keys, and `test/pipeline.test.js` runs them on generated relations.
 - **several values**: `gtfs:route_id`, `gtfs:shape_id` and `gtfs:trip_id:sample` hold every id that applies, separated by `;`: the shapes of a variant
   with one sample trip each, the route_ids a route_master already holds that are still in the feed. Within OSM's 255 characters.
 - **GTFS keys**: all with the feed code as a suffix, the mix being an error for PTNA. Keys left without it on an updated relation are removed.
-- **platform**: `public_transport=platform`, `highway=bus_stop` (`highway=platform` on a way, `bus_stop` being for nodes only), `bus=yes`.
+- **platform**: `public_transport=platform`, `highway=bus_stop` (`highway=platform` on a way, `bus_stop` being for nodes only). No `bus=yes`: an existing one is removed, unless the platform also serves another mode.
   An existing `route_ref` gets the line, none is created from a partial selection.
 - **one physical stop, several networks**: exported platforms combine `network` and its Wikidata/Wikipedia values in network order, separated by `;`.
   `gtfs:stop_id` is the ID of the stop of the first network, the one of `ref` and `ref:FR:Atoumod` without suffix, taken from them if needed. The IDs of the other
@@ -78,9 +79,10 @@ and GTFS keys, and `test/pipeline.test.js` runs them on generated relations.
 **Left out on purpose:** `operator` is only taken from relations already in OSM (a GTFS agency is often not the real operator);
 `interval` and `opening_hours` need a calendar reading that could be wrong; `gtfs:release_date` is not given reliably by feeds.
 
-**Stop names**, two choices on the converter: the official name of the GTFS, or `TOWN - Stop`, written on platforms, stop_positions, `from` and `to`.
-A town already in a stop name is recognised at its start, at its end or in brackets, with or without accents, whole or in part ("Norrey Calvaire"),
-so it is never written twice. The title of a line is `VILLE Arret` either way.
+**Stop names.** The punctuation of a name is written one way, whatever the source: `A - B` (from `A -B`, `A– B`, `A : B`), `A, B`, `A (B)`, `L'Église`, with `Saint-Malo`, `12:30` and `1,5` left alone. Platforms get `name=Charlotte Corday` and `official_name=MONDEVILLE - Charlotte Corday`; stop_positions, `from` and `to` get the same `name`.
+A town already in the name, from the GTFS or from OSM, is recognised at its start, at its end or in brackets, with or without accents, whole or in part ("Fleury Mairie"),
+and taken out. Capitals naming another place near the stop ("CAEN Chemin Vert") are taken out too, once Nominatim confirms the place. A name needing its town ("Hauts de Mondeville")
+stays whole, without `official_name`. The title of a line is `VILLE Arret`.
 
 **What PTNA says of these titles.** They follow its relaxed comparison (`check-name-relaxed`) when `from`, `via` and `to` are found in the title. It
 gives notes, which are not errors, on: its strict `check-name`, which only reads `=>`; a stop name that the title rewrites ("Avranches - Gare" as
@@ -113,29 +115,75 @@ large network asks Nominatim for each terminus, a few minutes the first time.
 
 ## Finding your way in the code
 
+### A conversion, step by step
+
+`runRoutes` in `src/pipeline.js` runs these steps in order. **Start there.**
+
 ```text
-GTFS ──► variants ──► map-matching ──► stops on the ground ──► relations ──► split ways ──► .osm
-gtfs.js              matching.js       stops.js, platforms.js  build.js      splitting.js   osm.js
-                                                               existing.js
+GTFS ──► OSM stops ──► names ──► traces ──► ways ──► relations ──► split ways ──► .osm
 ```
+
+| Step | What happens | Where |
+|---|---|---|
+| Read the feed | The lines of the selection and their variants: the distinct stop sequences. | `gtfs.js`, `zip.js` |
+| OSM stops | Platforms read around the stops, candidates of each GTFS stop, conventions of the feed. | `stops.js`, `detect.js` |
+| Names | Punctuation, accents, then `name`, `official_name` and the labels of the titles. | `naming.js`, `lookup.js` |
+| Existing relations | Relations of the area, network tags, feed code. | `existing.js`, `detect.js` |
+| Traces | A complete relation stays as it is, a good trace is kept, otherwise Valhalla matches the variant. | `reuse.js`, `matching.js` |
+| Ways | The travelled ways, and the road just beyond a terminus holding its stop_position. | `osm.js`, `reuse.js` |
+| Relations | stop_position and platform of each stop, trace cut down to the termini, `route` and `route_master`, new or updated. | `build.js`, `platforms.js`, `existing.js` |
+| Platform tags | GTFS and network tags, one ref per network. | `platforms.js` |
+| Split ways | Cut where routes enter or leave them, once for all the lines. | `splitting.js` |
+| Review and file | The window on refs and networks, then the `.osm` text. | `ref_review.js`, `osm.js` |
+
+### Every file
 
 | File | Role |
 |---|---|
-| `app.js`, `index.html`, `style.css` | The page. No GTFS or OSM logic here. |
-| `src/pipeline.js` | The steps of a run, in order. **Start here.** |
-| `src/net.js` | Every network call: throttling, retries, journal. |
-| `src/zip.js`, `src/gtfs.js` | Streaming ZIP and CSV reading, variants. |
-| `src/reuse.js` | Is the trace already in OSM good? Then it is kept. |
+| `app.js`, `index.html`, `style.css`, `theme.js` | The page. No GTFS or OSM logic here. |
+| `settings_form.js` | The Settings page, generated from `src/settings.js`. |
+| `serve.js` | Development server. |
+| `src/pipeline.js` | The steps of a run, in order. |
+| `src/gtfs.js`, `src/zip.js` | Streaming ZIP and CSV reading, variants. |
+| `src/stops.js` | GTFS stops, their candidate platforms, their neighbours and rivals. |
+| `src/naming.js` | Stop names, networks, titles of the relations. |
+| `src/reuse.js` | Is the trace or the whole relation in OSM good? Then it is kept. The road beyond a terminus. |
 | `src/matching.js` | Valhalla: shape, or route through the stops when the shape is wrong. |
-| `src/stops.js`, `src/platforms.js` | Candidate platforms, kerb side, stop_position placement. The rules are listed at the top of `platforms.js`. |
-| `src/build.js`, `src/existing.js` | Relations of a line; pairing with the existing ones. |
+| `src/platforms.js` | Kerb side, stop_position placement, tags of the platforms. The rules are listed at the top of the file. |
+| `src/build.js` | The relations of a line. |
+| `src/existing.js` | Pairing with the relations already in OSM, what is kept of their tags. |
 | `src/splitting.js` | Ways split where routes enter or leave them. |
-| `src/osm.js` | `Store` (what was read / what changed), Overpass queries, `.osm` reading and writing. |
-| `src/settings.js` | Every setting, its default and its description. The Settings page is generated from this list. |
+| `src/ref_review.js` | Refs and networks of shared platforms, the window before the download. |
+| `src/osm.js` | `Store` (what was read / what changed), Overpass queries, `.osm` reading and writing, GTFS ids corrected on reading. |
 | `src/detect.js` | What is read from OSM about a feed: tag suffix, stop_id tags, network. |
 | `src/lookup.js` | Nominatim, Wikidata and Wiktionary, and the checks made before believing them. |
-| `settings_form.js` | The Settings page. |
-| `src/platform_tags.js`, `src/ptna.js`, `src/via.js` | The other outputs. |
+| `src/net.js` | Every network call: throttling, retries, journal. |
+| `src/settings.js` | Every setting, its default and its description. |
+| `src/geo.js`, `src/util.js` | Local geometry; small helpers and the logger. |
+| `src/platform_tags.js` | Output: the Platforms format. |
+| `src/ptna.js` | Output: the PTNA list. |
+| `src/via.js` | Output: "via" added to an `.osm` file. |
+| `src/network_fix.js` | Output: the correction of a whole network. |
+
+### Where to change what
+
+| To change | Look at |
+|---|---|
+| How a stop or a relation is named | `cleanStopName`, `stopNames`, `routeLabel`, `routeName` in `naming.js` |
+| When a trace or a relation is left alone | `traceProblem`, `completeRelation` in `reuse.js` |
+| Which platform or stop_position a stop gets | `choosePlatform`, `locateStop` in `platforms.js` |
+| The tags of a platform | `stopTags`, `enrich` in `platforms.js`; `outputPlatformTags` in `osm.js` for what a file holds |
+| The tags of a relation | `routeTags` and `build` in `build.js`; `mergeTags` in `existing.js` for what stays of the old ones |
+| What is cut, and where | `betweenTermini` in `build.js`, `cutNodes` in `splitting.js` |
+| A distance or an option | `src/settings.js`: the page follows |
+
+### Rules to keep
+
+- **Nothing is uploaded.** Every output is a file that goes through a human, in JOSM.
+- **What is right in OSM stays.** A complete relation keeps its trace, a good trace is not recomputed, and a tag of another network is not overwritten.
+- **A doubt is reported, not guessed.** A case that cannot be settled stays as it is, with a line in the log.
+- **Only what changes goes in the file**, through `Store`: read objects are in its base, changed ones in `modified`.
+- **An online service may fail.** The run goes on without it, with a warning; only cancelling stops it.
 
 ## Debugging
 

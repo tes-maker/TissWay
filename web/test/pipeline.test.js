@@ -215,25 +215,25 @@ test("what PTNA checks: no message on the generated relations", async () => {
   assert.equal(byName["Bus 2: Alpha → Alpha"].roundtrip, "yes");
   const masters = objs.flatMap((obj) => [...obj.modified.values()]).filter((o) => o.tags?.type === "route_master");
   assert.deepEqual(masters.map((m) => m.tags.name).sort(), ["Bus 1: Charlie ↔ Alpha", "Bus 2: Alpha"]);
-  // PTNA's platform and stop_position checks: the vehicle, and stop_positions on their way
+  // the vehicle on stop_positions (PTNA's check), not on platforms
   for (const [, rel, obj] of routes) {
-    for (const [k, role] of rel.members.filter(([, r]) => r)) assert.equal(obj.get(k).tags.bus, "yes", `${role} ${k}`);
+    for (const [k, role] of rel.members.filter(([, r]) => r)) assert.equal(obj.get(k).tags.bus, role === "stop" ? "yes" : undefined, `${role} ${k}`);
   }
 });
 
-test("stops renamed TOWN - Stop: on platform, stop_position, from and to; the title says VILLE Arret", async () => {
+test("stops named without their town, official_name on the platforms; the title says VILLE Arret", async () => {
   town = "Fleury-sur-Orne";
-  Object.assign(settings, { stop_names: "town", update_existing: false });
+  settings.update_existing = false;
   const zip = { ...GTFS, "stops.txt": "stop_id,stop_name,stop_lat,stop_lon\nA,Fleury Alpha,49.00025,1.00015\nB,Bravo - Fleury-sur-Orne,49.0007,1.00015\nC,Charlie,49.0014,1.00015\n" };
   const { state } = await runRoutes(await Feed.open(makeZip(zip)), { network: "Bustown", ref: "R1" });
   const { obj } = state;
   const [rel] = [...obj.modified].filter(([k, o]) => k.startsWith("r-") && o.tags.type === "route").map(([, o]) => o);
   assert.equal(rel.tags.name, "Bus 1: FLEURY-SUR-ORNE Alpha → FLEURY-SUR-ORNE Charlie");
-  assert.deepEqual([rel.tags.from, rel.tags.to], ["FLEURY-SUR-ORNE - Alpha", "FLEURY-SUR-ORNE - Charlie"]);
-  const names = (role) => rel.members.filter(([, r]) => r === role).map(([k]) => obj.get(k).tags.name);
-  const expected = ["FLEURY-SUR-ORNE - Alpha", "FLEURY-SUR-ORNE - Bravo", "FLEURY-SUR-ORNE - Charlie"];
-  assert.deepEqual(names("platform"), expected);
-  assert.deepEqual(names("stop"), expected);
+  assert.deepEqual([rel.tags.from, rel.tags.to], ["Alpha", "Charlie"]);
+  const tagged = (role, key) => rel.members.filter(([, r]) => r === role).map(([k]) => obj.get(k).tags[key]);
+  assert.deepEqual(tagged("platform", "name"), ["Alpha", "Bravo", "Charlie"]);
+  assert.deepEqual(tagged("platform", "official_name"), ["FLEURY-SUR-ORNE - Alpha", "FLEURY-SUR-ORNE - Bravo", "FLEURY-SUR-ORNE - Charlie"]);
+  assert.deepEqual(tagged("stop", "name"), ["Alpha", "Bravo", "Charlie"]);
 });
 
 test("several shapes for a variant: separated by ;, and the feed's other route_ids stay on the route_master", async () => {

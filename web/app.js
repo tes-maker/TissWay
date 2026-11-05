@@ -7,6 +7,7 @@ import { agencyNetworks, slug } from "./src/naming.js";
 import { clearCaches, downloadGtfs, feedUrls, services } from "./src/net.js";
 import { runRoutes } from "./src/pipeline.js";
 import { writeOsm } from "./src/osm.js";
+import { runNetworkFix } from "./src/network_fix.js";
 import { runPlatforms } from "./src/platform_tags.js";
 import { applyPriority, closeNetworks, keepNetworkApart, listRefs, mergeNetworks, priorityRows, removeRef, restoreRef, sharedPlatforms } from "./src/ref_review.js";
 import { buildList, loadNetworks, refKey } from "./src/ptna.js";
@@ -57,6 +58,7 @@ function refresh() {
   $("via").hidden = !state.viaFile;
   $("action").hidden = !ready || busy;
   $("working").hidden = !busy || state.loading;
+  refreshFix();
   refreshConvert();
 }
 
@@ -375,7 +377,23 @@ async function showNetworks() {
   if (!names.length) select.add(new Option("No line for these modes", ""));
   if (names.includes(previous)) select.value = previous;
   select.disabled = !names.length;
+  showFixNetworks();
   showLines();
+}
+
+/** The networks of the feed for the correction of a whole network (Settings), the one of the converter first selected. */
+function showFixNetworks() {
+  const select = $("fix-network"), previous = select.value;
+  select.replaceChildren(...[...$("network").options].filter((o) => o.value).map((o) => new Option(o.text, o.value)));
+  select.value = [...select.options].some((o) => o.value === previous) ? previous : $("network").value;
+  refreshFix();
+}
+
+function refreshFix() {
+  const usable = Boolean(state.feed && $("fix-network").value);
+  $("fix-no-feed").hidden = usable;
+  $("fix-network").disabled = !usable;
+  $("fix-open").disabled = !usable || Boolean(state.controller);
 }
 
 const networkRoutes = () => state.routes.filter((r) => r.networkName === $("network").value);
@@ -472,6 +490,25 @@ async function exportPtna() {
   showResult({ files: [{ name: `ptna_${slug($("ptna-title").value.trim() || network)}.txt`, text, type: "text/plain" }], preview: text, summary: { lines: networks.get(network).length }, warningsBefore });
 }
 
+function openFix() {
+  $("fix-title").textContent = `Correct all of ${$("fix-network").value}?`;
+  $("fix-dialog").returnValue = "";
+  $("fix-dialog").showModal();
+}
+
+/** The window is closed: confirmed, the run shows on the Converter page, with its progress, its log and its file. */
+function closeFix() {
+  if ($("fix-dialog").returnValue !== "confirm") return;
+  const network = $("fix-network").value;
+  hideResult();
+  selectView("generate");
+  task(async () => {
+    const warningsBefore = state.warnings;
+    const { xml, filename, summary, detected } = await runNetworkFix(state.feed, { network, onProgress: progress });
+    showResult({ files: [{ name: filename, text: xml, type: OSM_TYPE }], summary, detected, warningsBefore });
+  });
+}
+
 async function exportVia() {
   const file = state.viaFile;
   const warningsBefore = state.warnings;
@@ -498,7 +535,6 @@ function selectView(name) {
 /** The settings also on the converter. */
 function showOptions() {
   $("split-roundabouts").checked = settings.split_roundabouts;
-  document.querySelector(`[name=stop_names][value=${settings.stop_names}]`).checked = true;
 }
 
 function showSettingsCount() {
@@ -570,6 +606,8 @@ function wire() {
     });
   }
 
+  $("fix-open").addEventListener("click", openFix);
+  $("fix-dialog").addEventListener("close", closeFix);
   $("show-refs").addEventListener("click", openReview);
   $("ref-dialog").addEventListener("close", closeReview);
   $("ref-show-all").addEventListener("change", showRefRows);
@@ -581,7 +619,6 @@ function wire() {
     showRefRows();
   });
   $("split-roundabouts").addEventListener("change", (e) => setOption("split_roundabouts", e.target.checked));
-  for (const radio of document.querySelectorAll("[name=stop_names]")) radio.addEventListener("change", () => setOption("stop_names", radio.value));
   $("verbose").addEventListener("change", (e) => $("journal").classList.toggle("verbose", e.target.checked));
   $("only-warnings").addEventListener("change", (e) => $("journal").classList.toggle("only-warnings", e.target.checked));
   $("journal-clear").addEventListener("click", () => {

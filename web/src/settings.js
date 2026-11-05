@@ -34,7 +34,6 @@ export const SCHEMA = [
     { key: "driving_side", label: "Driving side", type: "select", options: [AUTO, "right", "left"], value: AUTO, help: 'Platforms are on the kerb side. "auto": from the country of the stops (Nominatim, Wikidata).' },
   ] },
   { group: "Names", items: [
-    { key: "stop_names", label: "Stop names", type: "select", options: ["gtfs", "town"], value: "gtfs", help: '"gtfs": the official name of the feed. "town": "TOWN - Stop", on platforms, stop_positions, from and to; a town already in the name is moved first, never repeated (one Nominatim call per stop). The titles of the lines are "Bus 12: VILLE Arret → VILLE Arret" either way.' },
     { key: "fix_accents", label: "Restore dropped accents", type: "boolean", value: true, help: "From the spelling of nearby OSM platforms, else from Wiktionary in the language of the feed. Every change is listed in the log." },
   ] },
   { group: "Start of the line names", intro: 'What comes before the ref in the names of the relations, by mode of the GTFS line: "Car Nomad" gives "Car Nomad 12: A → B". Empty: the default.', items:
@@ -54,6 +53,7 @@ export const SCHEMA = [
     { key: "thresholds.holder_m", label: "Stop -> platform with its stop_id", type: "number", unit: "m", value: 100, min: 0, help: "Reach for an OSM platform already carrying the stop_id." },
     { key: "thresholds.stop_position_m", label: "Stop -> travelled way", type: "number", unit: "m", value: 40, min: 0, help: "Further away, the stop_position is reported as far." },
     { key: "thresholds.stop_position_reuse_m", label: "Existing stop_position, reuse", type: "number", unit: "m", value: 30, min: 0, help: "Projection of the stop -> existing stop_position that may be reused." },
+    { key: "thresholds.terminus_m", label: "First and last stop: search for a stop_position", type: "number", unit: "m", value: 80, min: 0, help: "Reach at the ends of a line, independent of the others: an existing stop_position is looked for this far, also on the road just beyond the trace, rather than creating a duplicate. Beyond the usual reuse reach, it must have the name of the stop or none, and be closer to this stop than to the next one." },
     { key: "thresholds.stop_position_shared_m", label: "Existing stop_position, always shared", type: "number", unit: "m", value: 10, min: 0, help: "This close, it is reused even if closer to the stop across the road." },
     { key: "thresholds.duplicate_stop_m", label: "Duplicate stops", type: "number", unit: "m", value: 5, min: 0, help: "Two GTFS stops this close are the same physical platform (aggregated feeds)." },
     { key: "thresholds.opposite_stop_m", label: "Opposite stop", type: "number", unit: "m", value: 30, min: 0, help: "For stops without sibling information." },

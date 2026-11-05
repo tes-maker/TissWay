@@ -10,6 +10,7 @@ import { log } from "./util.js";
 const WIKIDATA_API = "https://www.wikidata.org/w/api.php";
 const WIKIDATA_SPARQL = "https://query.wikidata.org/sparql";
 const PUBLIC_TRANSPORT = "wd:Q178512"; // what a network must be an instance of, directly or not
+const PLACE_REACH = 0.3; // degrees around a stop where a place named in its name can be
 const BATCH = 25; // words per Wiktionary query (two titles each, the API takes 50)
 const isAscii = (s) => /^[\x00-\x7f]*$/.test(s);
 
@@ -47,6 +48,13 @@ export const lookup = {
   async placesAt(lat, lon, lang) {
     const a = await lookup.reverse(lat, lon, lang);
     return [...new Set([a.village, a.town, a.city, a.municipality].filter(Boolean))];
+  },
+
+  /** Is there a town or a village of this name around a position? Unknown counts as no. */
+  placeNear(name, lat, lon) {
+    const viewbox = [lon - PLACE_REACH, lat + PLACE_REACH, lon + PLACE_REACH, lat - PLACE_REACH].map((v) => v.toFixed(1)).join(",");
+    const params = new URLSearchParams({ format: "jsonv2", q: name, featureType: "settlement", limit: 1, bounded: 1, viewbox });
+    return soft("Nominatim", false, async () => (await cachedJson(`${settings.services.nominatim_url}/search?${params}`, lookupDelay())).length > 0);
   },
 
   /** ISO code ("fr") of the country at a position, null if unknown. */

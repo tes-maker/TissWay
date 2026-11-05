@@ -7,7 +7,8 @@
   "type": "module",
   "scripts": {
     "deploy": "gh-pages -d .",
-    "start": "serve ."
+    "start": "node serve.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"

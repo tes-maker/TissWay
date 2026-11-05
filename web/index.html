@@ -70,11 +70,6 @@
       </fieldset>
 
       <div data-panel="routes" class="panel">
-        <fieldset class="formats two">
-          <legend>Stop names</legend>
-          <label><input type="radio" name="stop_names" value="gtfs" checked><span><b>Official name</b><small>as in the GTFS</small></span></label>
-          <label><input type="radio" name="stop_names" value="town"><span><b>TOWN - Stop</b><small>e.g. CAEN - Gare</small></span></label>
-        </fieldset>
         <label class="check"><input id="split-roundabouts" type="checkbox" role="switch"> Split roundabouts</label>
         <label>Line, one at a time
           <input id="line-filter" type="search" placeholder="Search a line: 122, Caen…" autocomplete="off">
@@ -222,6 +217,32 @@
   </label>
   <p id="settings-status" class="status" role="status"></p>
   <div id="settings-form" class="stack"></div>
+
+  <details class="more fix-zone">
+    <summary>Correct a whole network</summary>
+    <p class="hint">Puts the stops and relations already mapped in OSM in the form of this site, without changing a trace. You get a file to review.</p>
+    <p id="fix-no-feed" class="hint">Load a feed on the Converter page first: it gives the networks and their area.</p>
+    <div class="fix-row">
+      <label>Network <select id="fix-network"></select></label>
+      <button id="fix-open" type="button" class="small red">Correct this network…</button>
+    </div>
+  </details>
+
+  <dialog id="fix-dialog" class="ref-dialog" aria-labelledby="fix-title">
+    <h2 id="fix-title" tabindex="-1" autofocus></h2>
+    <div class="error" role="alert"><b>A mass edit of what others have mapped.</b> Every stop and relation of the network may change, including stops shared with other networks.</div>
+    <ul class="fix-list">
+      <li><b>Stops:</b> <code>name</code> without the town, <code>official_name</code> with it, punctuation, no <code>bus=yes</code> on platforms, GTFS ids and network tags tidied.</li>
+      <li><b>Route and route_master relations:</b> <code>name</code>, <code>from</code>, <code>to</code>, <code>via</code>.</li>
+      <li><b>Unchanged:</b> ways, members, refs, positions.</li>
+    </ul>
+    <p class="hint">Nothing is sent to OpenStreetMap: you get an .osm file. Before uploading it, review it in JOSM and follow the <a href="https://wiki.openstreetmap.org/wiki/Automated_Edits_code_of_conduct" target="_blank" rel="noopener">Automated Edits code of conduct</a>: document the edit and discuss it with the local community first.</p>
+    <p class="hint">Allow about one second per stop on the first run: towns come from Nominatim, one request per second at most.</p>
+    <form method="dialog" class="fix-actions">
+      <button value="cancel">Cancel</button>
+      <button value="confirm" class="red">Generate the correction file</button>
+    </form>
+  </dialog>
 </main>
 
 <footer class="foot">
