@@ -12,9 +12,8 @@
 //   stop_position of the opposite stop may be within reach (reusable);
 // - whatever the above, a stop_position closer to the stop across the road than to this stop is not reused, even on a good trace (closerToOpposite,
 //   settings.stop_position_own): it is left to that stop, and this stop gets its own;
-// - a new stop_position only carries public_transport=stop_position, <vehicle>=yes, name and, on a two-way way,
-//   direction=forward|backward. An existing one keeps its tags: only the missing ones are added, except name,
-//   replaced by the name of the stop. A direction set here is removed if it turns out to be served both ways;
+// - a stop_position only carries public_transport=stop_position, <vehicle>=yes and name, replaced by the name of the stop: what an existing one has more goes to its platform
+//   when it lacks it (stopPositionOnly), but for what describes something else on the node, like a crossing;
 // - the platform is chosen on the kerb side of the way (settings.driving_side) in the direction of travel, judged
 //   on the road segment next to the platform (sideSegment), and for the GTFS stop on its segment (stopSegment);
 // - a platform found with the extended reach is only used on the kerb side and next to the way (verified);
@@ -187,41 +186,19 @@ export function locateStop(obj, ways, pos, { start = 0, max_m = null, rivals = [
   return makeSpot(i, interpolate(pa, pb, t), d, { a: nodes[k], b: nodes[k + 1] });
 }
 
-/** Key of the stop_position of spot: the existing one, retagged, or a new node inserted in the way. Either way it
- * gets the direction of travel (setDirection). */
-export function materialize(obj, ways, spot, name, vehicle = "bus") {
-  const fwd = forward(obj, ways, spot.wayIndex);
-  const way = ways[spot.wayIndex];
+/** Key of the stop_position of spot: the existing one, retagged, or a new node inserted in the way. into: see setStopPositionTags. */
+export function materialize(obj, ways, spot, name, vehicle = "bus", into = null) {
   if (spot.node) {
-    setStopPositionTags(obj, spot.node, name, vehicle);
-    setDirection(obj, way, spot.node, fwd);
+    setStopPositionTags(obj, spot.node, name, vehicle, into);
     return spot.node;
   }
-  const nodes = obj.edit(way).nodes;
+  const nodes = obj.edit(ways[spot.wayIndex]).nodes;
   const k = nodes.findIndex((n, i) => n === spot.a && nodes[i + 1] === spot.b);
   const key = newKey("n");
   obj.set(key, { lat: spot.pos[0], lon: spot.pos[1], tags: stopPositionTags(name, vehicle) });
   nodes.splice(k + 1, 0, key);
   Object.assign(spot, { node: key, a: null, b: null });
-  setDirection(obj, way, key, fwd);
   return key;
-}
-
-const ONEWAY = new Set(["yes", "1", "true", "-1", "reversible", "alternating"]);
-
-/** direction=forward|backward on the stop_position key of way: the direction of travel relative to the order of the
- * way's nodes. Only on a two-way way and inside it (at an end, shared with the next way, it would be ambiguous). A
- * direction already in OSM is kept; one set here is removed if the stop_position is served both ways (o.directions,
- * not written). */
-function setDirection(obj, way, key, fwd) {
-  const { tags, nodes } = obj.get(way);
-  if (ONEWAY.has(tags.oneway) || tags.junction === "roundabout" || tags.junction === "circular") return;
-  if (!nodes.slice(1, -1).includes(key)) return;
-  if ("direction" in obj.get(key).tags && !obj.get(key).directions) return;
-  const o = obj.edit(key);
-  (o.directions ??= new Set()).add(fwd ? "forward" : "backward");
-  if (o.directions.size === 1) o.tags.direction = [...o.directions][0];
-  else delete o.tags.direction;
 }
 
 /** Does the variant travel ways[i] in the order of its nodes? Deduced from the nodes shared with the previous way
@@ -733,12 +710,42 @@ export function enrich(obj, key, tags, sizes = null, ofStop = new Map()) {
 /** The only tags of a stop_position: the stop's data (ref, network, operator...) is on the platform. */
 export const stopPositionTags = (name, vehicle = "bus") => ({ [vehicle]: "yes", name, public_transport: "stop_position" });
 
-/** Complete the tags of an existing OSM stop_position: its own tags are kept, only the missing ones are added, except
- * name, replaced by the name of the stop like on the platform. */
-export function setStopPositionTags(obj, key, name, vehicle = "bus") {
+const VEHICLE_KEYS = new Set(["bus", "coach", "trolleybus", "share_taxi", ...OTHER_VEHICLES]);
+/** On a node of the road, what describes something else than the stop. */
+const OTHER_FEATURE = /^(?:crossing(?::.*)?|traffic_signals(?::.*)?|traffic_calming|barrier|ford|railway|note|fixme)$/i;
+/** What says which stop it is: on a stop_position shared by two stops, it may be the other one's. */
+const STOP_IDENTITY = /^(?:gtfs:|(?:ref|local_ref|network|operator|route_ref)(?::|$))/;
+
+/** {tags, moved} of an object that is a stop_position: tags, only public_transport=stop_position, its vehicles and its name, as well as what describes something else on the node
+ * (highway=traffic_signals, crossing...), and moved, the tags that belong on its platform. direction is dropped, and highway=bus_stop or platform, which its platform has. */
+export function stopPositionOnly(old, name, vehicles = []) {
+  const tags = { public_transport: "stop_position" }, moved = {};
+  for (const [k, v] of Object.entries(old)) {
+    if (k === "public_transport" || k === "name" || k === "direction") continue;
+    if (k === "highway") {
+      if (v !== "bus_stop" && v !== "platform") tags[k] = v;
+    } else if (VEHICLE_KEYS.has(k) || OTHER_FEATURE.test(k)) tags[k] = v;
+    else moved[k] = v;
+  }
+  for (const vehicle of vehicles) tags[vehicle] = "yes";
+  if (name ?? old.name) tags.name = name ?? old.name;
+  return { tags, moved };
+}
+
+/** Add to the tags t of a platform what its stop_position should not have, without replacing anything. Its identity only from a stop_position of one stop (exclusive). */
+export function takeFromStopPosition(t, moved, exclusive = false) {
+  for (const [k, v] of Object.entries(moved)) if (!(k in t) && (exclusive || !STOP_IDENTITY.test(k))) t[k] = v;
+}
+
+/** The tags of an existing OSM stop_position, see stopPositionOnly. into: {platform, exclusive}, where what it should not have goes. */
+export function setStopPositionTags(obj, key, name, vehicle = "bus", into = null) {
   const old = obj.get(key).tags;
-  const tags = { ...stopPositionTags(name, vehicle), ...old, [vehicle]: "yes", name, public_transport: "stop_position" };
+  const { tags, moved } = stopPositionOnly(old, name, [vehicle]);
   if (!sameTags(old, tags)) obj.edit(key).tags = tags;
+  if (!into?.platform || !obj.has(into.platform)) return;
+  const taken = { ...obj.get(into.platform).tags };
+  takeFromStopPosition(taken, moved, into.exclusive);
+  if (!sameTags(taken, obj.get(into.platform).tags)) obj.edit(into.platform).tags = taken;
 }
 
 /** route_ref of a stop, when it has one, completed with this line: PTNA reports a route_ref that lacks it. None is added where

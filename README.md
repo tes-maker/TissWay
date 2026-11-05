@@ -47,7 +47,7 @@ The tags follow [Public transport](https://wiki.openstreetmap.org/wiki/Public_tr
 [PTNA](https://ptna.openstreetmap.de) checks. `ptnaProblems` in `test/helpers.js` reproduces its checks of names, `from`, `to`, `via`
 and GTFS keys, and `test/pipeline.test.js` runs them on generated relations.
 
-- **route**: `name` = `Bus 12: VILLE Arret → VILLE Arret`, `Bus 12: VILLE Arret → X → Y → VILLE Arret` for variants sharing their termini, `ref`, `from`, `to`,
+- **route**: `name` = `Bus 12: VILLE Arret → VILLE Arret`, `Bus 12: VILLE Arret → VILLE Arret → VILLE Arret` for variants sharing their termini, `ref`, `from`, `to`,
   `network`, `public_transport:version=2`, `colour`, `duration` (median of the trips, from the GTFS). `via=X;Y` when variants share their
   termini, `roundtrip=yes` when the first and last platform are the same.
 - **route_master**: `name` = `Bus 12: VILLE Arret ↔ VILLE Arret`, the two termini most trips use, and the tags common to its routes.
@@ -170,7 +170,7 @@ GTFS ──► OSM stops ──► names ──► traces ──► ways ──�
 
 | To change | Look at |
 |---|---|
-| How a stop or a relation is named | `cleanStopName`, `stopNames`, `routeLabel`, `routeName` in `naming.js` |
+| How a stop or a relation is named | `cleanStopName`, `stopNames`, `stopLabel`, `tripTitle` in `naming.js` |
 | When a trace or a relation is left alone | `traceProblem`, `completeRelation` in `reuse.js` |
 | Which platform or stop_position a stop gets | `choosePlatform`, `locateStop` in `platforms.js` |
 | The tags of a platform | `stopTags`, `enrich` in `platforms.js`; `outputPlatformTags` in `osm.js` for what a file holds |

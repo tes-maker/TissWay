@@ -2,7 +2,7 @@
 
 import { feedKey, joinIds, updatedMaster, updatedRelation } from "./existing.js";
 import { latlon, xy } from "./geo.js";
-import { masterLabel, routeLabel, routeName, tripLabel } from "./naming.js";
+import { masterLabel, modePrefix, routeName, tripTitle } from "./naming.js";
 import { isNew, newKey } from "./osm.js";
 import { linkNode } from "./splitting.js";
 import { VEHICLE, choosePlatform, completeRouteRef, fixSide, kerbSide, locateStop, makeSpot, materialize, onKerb, roadDistance, sideSegment, stopSegment } from "./platforms.js";
@@ -91,9 +91,8 @@ class LineBuilder {
     const { obj, stops } = this;
     v.seq.forEach((stopId, i) => {
       const { stop, platform, way, pos } = v.complete[i];
-      materialize(obj, v.ways, makeSpot(way, latlon(obj.get(stop)), 0, { node: stop }), stops.df.get(stopId).stop_name, this.vehicle);
+      materialize(obj, v.ways, makeSpot(way, latlon(obj.get(stop)), 0, { node: stop }), stops.df.get(stopId).stop_name, this.vehicle, { platform, exclusive: !stops.rivals.get(stopId)?.length });
       if (this.mode === "coach") obj.edit(stop).tags.coach = "yes";
-      completeRouteRef(obj, stop, this.route.route_short_name);
       completeRouteRef(obj, platform, this.route.route_short_name);
       if (!this.assignments.has(stopId)) this.assignments.set(stopId, new Map());
       this.assignments.get(stopId).set(platform, [this.network, pos, this.mode, true]);
@@ -131,9 +130,8 @@ class LineBuilder {
         start = spot.wayIndex;
         const name = stops.df.get(dataId).stop_name;
         if (spot.distance > settings.thresholds.stop_position_m) this.far.push(name);
-        const stopPosition = materialize(obj, ways, spot, name, this.vehicle);
+        const stopPosition = materialize(obj, ways, spot, name, this.vehicle, { platform, exclusive: !stops.rivals.get(dataId)?.length });
         if (this.mode === "coach") obj.edit(stopPosition).tags.coach = "yes"; // required with route=coach by PTNA
-        completeRouteRef(obj, stopPosition, this.route.route_short_name);
         members.push([stopPosition, "stop"]);
         if (i === 0) first = [spot.wayIndex, stopPosition];
         if (i === v.seq.length - 1) last = [spot.wayIndex, stopPosition];
@@ -171,7 +169,7 @@ class LineBuilder {
       const members = this.variantMembers(v);
       const first = this.stops.df.get(v.seq[0]), last = this.stops.df.get(v.seq.at(-1));
       endpoints.push([first.label, last.label, v.trips ?? 1]);
-      const tags = { type: "route", route: mode, ...(ref ? { ref } : {}), name: routeName(mode, ref, tripLabel(first.label, last.label)),
+      const tags = { type: "route", route: mode, ...(ref ? { ref } : {}), name: tripTitle(modePrefix(mode), ref, first.label, last.label),
         ...common, [feedKey("gtfs:trip_id:sample")]: joinIds(v.trip_ids ?? [v.trip_id]) };
       if (v.shape_id && v.source !== "stops") tags[feedKey("gtfs:shape_id")] = joinIds(v.shape_ids ?? [v.shape_id]);
       Object.assign(tags, { from: first.stop_name, to: last.stop_name, "public_transport:version": "2" });
@@ -233,7 +231,9 @@ class LineBuilder {
         if (!vias[k].length) return;
         drafts[i][1].via = joinIds(vias[k]); // the exact names of the platforms
         const [from, to] = endpoints[i];
-        drafts[i][1].name = routeName(this.mode, ref, tripLabel(from, to, vias[k].map((name) => routeLabel([], name))), tripLabel(from, to));
+        const stops = variants[i].seq.map((id) => this.stops.df.get(id));
+        const labels = vias[k].map((name) => stops.find((s) => s.stop_name === name)?.label ?? name);
+        drafts[i][1].name = tripTitle(modePrefix(this.mode), ref, from, to, labels);
       });
     }
     this.sameNames = [...counter(drafts.map(([, tags]) => tags.name))].filter(([, n]) => n > 1).map(([name]) => name);

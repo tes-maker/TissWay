@@ -85,6 +85,7 @@ export function fromOverpass(elements) {
   return out;
 }
 
+const NOT_ROADS = new Set(["footway", "path", "pedestrian", "platform", "steps", "cycleway", "corridor", "bridleway"]);
 const BATCH = 2000; // ids per Overpass query
 const numericIds = (keys, kind) => [...keys].filter((k) => k[0] === kind && !isNew(k)).map((k) => k.slice(1));
 
@@ -104,6 +105,14 @@ const readNodes = (keys) => inBatches(numericIds(keys, "n"), (ids) => `node(id:$
 export async function readObjects(keys) {
   const list = [...keys];
   return { ...(await readNodes(list)), ...(await inBatches(numericIds(list, "w"), (ids) => `way(id:${ids});out meta center;`)) };
+}
+
+/** Those of these nodes that are on a road: a highway=* other than for people on foot. */
+export async function onRoad(keys) {
+  const ways = await inBatches(numericIds(keys, "n"), (ids) => `node(id:${ids});way(bn)[highway];out meta;`);
+  const road = Object.values(ways).filter((w) => w.nodes && !NOT_ROADS.has(w.tags.highway));
+  const wanted = new Set(keys);
+  return new Set(road.flatMap((w) => w.nodes).filter((n) => wanted.has(n)));
 }
 
 /** Relations containing these ways. */

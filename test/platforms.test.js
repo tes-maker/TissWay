@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { approx } from "./helpers.js";
 import { buildLine } from "../src/build.js";
 import { Store } from "../src/osm.js";
-import { choosePlatform, completeRouteRef, enrich, filterRoadPlatforms, fixSide, forward, kerbSide, layBy, locateStop, makeSpot, materialize,
+import { stopPositionOnly, choosePlatform, completeRouteRef, enrich, filterRoadPlatforms, fixSide, forward, kerbSide, layBy, locateStop, makeSpot, materialize,
   roadDistance, setStopPositionTags, sideSegment, stopPositionTags, stopRef, stopSegment, stopTags, tagPlatforms, travelSegment } from "../src/platforms.js";
 import { settings } from "../src/settings.js";
 import { Stops } from "../src/stops.js";
@@ -78,36 +78,8 @@ test("locate changes nothing and materialize inserts the node", () => {
   assert.equal(obj.modified.size, 0);
   const key = materialize(obj, ["wR"], spot, "Hôpital");
   assert.deepEqual(obj.get("wR").nodes, ["r1", "r2", key, "r3", "r4", "r5"]);
-  assert.deepEqual(obj.get(key).tags, { ...stopPositionTags("Hôpital"), direction: "forward" });
+  assert.deepEqual(obj.get(key).tags, { bus: "yes", name: "Hôpital", public_transport: "stop_position" });
   assert.deepEqual(obj.base.get("wR").nodes, ["r1", "r2", "r3", "r4", "r5"]); // what was read is untouched
-});
-
-test("stop_position direction follows the travel against node order", () => {
-  const obj = street(), ways = ["wN", "wR", "wS"];
-  const key = materialize(obj, ways, locateStop(obj, ways, [49.0004, EAST]), "Hôpital");
-  assert.equal(obj.get(key).tags.direction, "backward");
-});
-
-test("no direction on a oneway way", () => {
-  const obj = street();
-  obj.base.get("wR").tags.oneway = "yes";
-  const key = materialize(obj, ["wR"], locateStop(obj, ["wR"], [49.0004, EAST]), "Hôpital");
-  assert.ok(!("direction" in obj.get(key).tags));
-});
-
-test("existing direction kept", () => {
-  const obj = withStopPosition(street(), "nSP", 49.0004, "r2");
-  obj.base.get("nSP").tags.direction = "backward";
-  const spot = locateStop(obj, ["wR"], [49.0004, EAST]);
-  materialize(obj, ["wR"], spot, "Hôpital");
-  assert.equal(obj.get(spot.node).tags.direction, "backward");
-});
-
-test("direction removed when served both ways", () => {
-  const obj = street();
-  const key = materialize(obj, ["wR"], locateStop(obj, ["wR"], [49.0004, EAST]), "Hôpital");
-  materialize(obj, ["wN", "wR", "wS"], makeSpot(1, [obj.get(key).lat, obj.get(key).lon], 0, { node: key }), "Hôpital");
-  assert.ok(!("direction" in obj.get(key).tags));
 });
 
 const reuseCases = [
@@ -156,27 +128,37 @@ test("stop_position created even far from the trace", () => {
   assert.ok(obj.get(["w1", "w2"][spot.wayIndex]).nodes.includes(key));
 });
 
-test("existing stop_position keeps its tags", () => {
-  const obj = new Store(road());
-  const old = { public_transport: "stop_position", bus: "yes", name: "Hôpital", direction: "forward", ref: "DRELECL1", network: "Linéad", "gtfs:stop_id": "S1" };
-  obj.base.get("n2").tags = { ...old };
-  setStopPositionTags(obj, "n2", "Hôpital");
-  assert.deepEqual(obj.get("n2").tags, old);
-  assert.ok(!obj.modified.has("n2"));
+test("an existing stop_position keeps only its vehicle and name, the rest goes to its platform", () => {
+  const obj = withStopPosition(street(), "nSP", 49.0004, "r2");
+  Object.assign(obj.base.get("nSP").tags, { highway: "bus_stop", direction: "forward", shelter: "yes", bench: "yes", ref: "DRELECL1", network: "Linéad", "gtfs:stop_id": "S1", route_ref: "1", name: "Leclerc" });
+  obj.base.set("nP", { lat: 49.0004, lon: EAST, tags: { public_transport: "platform", bench: "no" } });
+  const spot = locateStop(obj, ["wR"], [49.0004, EAST]);
+  materialize(obj, ["wR"], spot, "Hôpital", "bus", { platform: "nP", exclusive: true });
+  assert.deepEqual(obj.get(spot.node).tags, { bus: "yes", name: "Hôpital", public_transport: "stop_position" });
+  assert.deepEqual(obj.get("nP").tags, { public_transport: "platform", bench: "no", shelter: "yes", ref: "DRELECL1", network: "Linéad", "gtfs:stop_id": "S1", route_ref: "1" });
+  assert.equal(obj.modified.has("wR"), false);
 });
 
-test("existing stop_position renamed like the platform", () => {
-  const obj = new Store(road());
-  obj.base.get("n2").tags = { public_transport: "stop_position", bus: "yes", name: "Leclerc", direction: "forward" };
-  setStopPositionTags(obj, "n2", "Hôpital");
-  assert.deepEqual(obj.get("n2").tags, { public_transport: "stop_position", bus: "yes", name: "Hôpital", direction: "forward" });
+test("a stop_position shared by two stops: what says which stop it is stays off the platform", () => {
+  const obj = withStopPosition(street(), "nSP", 49.0004, "r2");
+  Object.assign(obj.base.get("nSP").tags, { shelter: "yes", ref: "X", network: "N", "gtfs:stop_id": "S1" });
+  obj.base.set("nP", { lat: 49.0004, lon: EAST, tags: { public_transport: "platform" } });
+  materialize(obj, ["wR"], locateStop(obj, ["wR"], [49.0004, EAST]), "Hôpital", "bus", { platform: "nP", exclusive: false });
+  assert.deepEqual(obj.get("nP").tags, { public_transport: "platform", shelter: "yes" });
 });
 
-test("existing stop_position gets the missing tags", () => {
-  const obj = new Store(road());
-  obj.base.get("n2").tags = { highway: "bus_stop", direction: "backward" };
-  setStopPositionTags(obj, "n2", "Hôpital");
-  assert.deepEqual(obj.get("n2").tags, { highway: "bus_stop", direction: "backward", ...stopPositionTags("Hôpital") });
+test("what describes something else on the node of a stop_position stays", () => {
+  assert.deepEqual(stopPositionOnly({ public_transport: "stop_position", highway: "traffic_signals", crossing: "marked", "crossing:island": "yes", barrier: "bollard", bus: "yes", tram: "yes", note: "à revoir", shelter: "yes" }, "Gare", ["bus"]), {
+    tags: { public_transport: "stop_position", highway: "traffic_signals", crossing: "marked", "crossing:island": "yes", barrier: "bollard", bus: "yes", tram: "yes", note: "à revoir", name: "Gare" },
+    moved: { shelter: "yes" },
+  });
+  assert.deepEqual(stopPositionOnly({ highway: "bus_stop", name: "Gare" }, null, ["trolleybus"]).tags, { public_transport: "stop_position", trolleybus: "yes", name: "Gare" });
+});
+
+test("a stop_position with nothing more is not modified", () => {
+  const obj = withStopPosition(street(), "nSP", 49.0004, "r2");
+  materialize(obj, ["wR"], locateStop(obj, ["wR"], [49.0004, EAST]), "Hôpital");
+  assert.equal(obj.modified.size, 0);
 });
 
 test("existing stop_position keeps the other vehicles", () => {

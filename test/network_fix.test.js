@@ -4,7 +4,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import { makeZip } from "./helpers.js";
 import { Feed } from "../src/gtfs.js";
 import { clearCaches, services } from "../src/net.js";
-import { prefixOf, runNetworkFix } from "../src/network_fix.js";
+import { prefixOf, runNetworkFix, stopKind } from "../src/network_fix.js";
 import { parseXml } from "../src/osm.js";
 import { configure, settings } from "../src/settings.js";
 
@@ -135,7 +135,7 @@ test("variants told apart keep their via: the tag and the title follow the new n
   answer.relations[0].members.splice(2, 0, member("node", 5, "platform"));
   const route = read((await run()).xml).get("r30");
   assert.equal(route.tags.via, "Mairie");
-  assert.equal(route.tags.name, "Car Nomad 224: MONDEVILLE Charlotte Corday → Mairie → LISIEUX Gare");
+  assert.equal(route.tags.name, "Car Nomad 224: MONDEVILLE Charlotte Corday → MONDEVILLE Mairie → LISIEUX Gare");
 });
 
 test("stops between the termini in a name, without via, are kept", async () => {
@@ -150,6 +150,70 @@ test("a route_master without a name of this form follows its routes", async () =
   assert.match(read((await run()).xml).get("r31").tags.name, /^Car Nomad 224: /);
   delete answer.relations[1].tags.name;
   assert.match(read((await run()).xml).get("r31").tags.name, /^Car Nomad 224: /);
+});
+
+test("a stop_position keeps only its vehicle and name, its platform takes the rest", async () => {
+  line();
+  Object.assign(answer.objects[1].tags, { highway: "bus_stop", shelter: "yes", ref: "A1", network: "Nomad Car", direction: "forward", "gtfs:stop_id": "S" });
+  const out = read((await run()).xml);
+  assert.deepEqual(out.get("n2").tags, { public_transport: "stop_position", bus: "yes", name: "Charlotte Corday" });
+  assert.equal(out.get("n1").tags.shelter, "yes");
+  assert.equal(out.get("n1").tags.ref, "A1");
+  assert.equal(out.get("n1").tags["gtfs:stop_id"], "S");
+});
+
+test("a stop_position without a name takes the one of its platform; without a vehicle, the one of its line", async () => {
+  line();
+  answer.objects[1].tags = { public_transport: "stop_position" };
+  assert.deepEqual(read((await run()).xml).get("n2").tags, { public_transport: "stop_position", bus: "yes", name: "Charlotte Corday" });
+});
+
+for (const [what, tags, role, road, kind] of [
+  ["right", { public_transport: "stop_position" }, "stop", false, "stop"],
+  ["right", { public_transport: "platform" }, "platform", true, "platform"],
+  ["tagged platform, role stop, on the road", { public_transport: "platform" }, "stop", true, "stop"],
+  ["tagged platform, role stop, beside it", { public_transport: "platform" }, "stop", false, "platform"],
+  ["tagged stop_position, role platform, on the road", { public_transport: "stop_position" }, "platform", true, "stop"],
+  ["tagged stop_position, role platform, beside it", { public_transport: "stop_position" }, "platform", false, "platform"],
+  ["no tag, on the road", { highway: "bus_stop" }, "platform", true, "stop"],
+  ["no tag, beside it", { highway: "bus_stop" }, "stop", false, "platform"],
+]) {
+  test(`stopKind: ${what}, ${role}, ${road ? "on" : "off"} the road`, () => assert.equal(stopKind("n1", tags, { stop: role === "stop", platform: role === "platform" }, road), kind));
+}
+test("stopKind: a way is a platform", () => assert.equal(stopKind("w1", { public_transport: "stop_position" }, { stop: true }, true), "platform"));
+
+test("a stop_position beside the road, in a platform role, becomes a platform; on the road, in a platform role, its role changes", async () => {
+  line();
+  answer.objects[2].tags = { public_transport: "stop_position", name: "Gare" }; // n3, role platform, not on the road
+  answer.objects[0].tags = { highway: "bus_stop", name: "Charlotte Corday", official_name: "MONDEVILLE - Charlotte Corday" }; // n1, role platform, on the road
+  answer.relations[0].members = [member("node", 1, "platform"), member("node", 4, "stop"), member("node", 3, "platform"), member("way", 7, "")];
+  answer.objects.push({ type: "way", id: 70, version: 1, nodes: [1, 99], tags: { highway: "residential" } }, { type: "way", id: 71, version: 1, nodes: [3, 99], tags: { highway: "footway" } });
+  const out = read((await run()).xml);
+  assert.deepEqual(out.get("n1").tags, { public_transport: "stop_position", bus: "yes", name: "Charlotte Corday" });
+  assert.equal(out.get("n3").tags.public_transport, "platform");
+  assert.equal(out.get("n3").tags.highway, "bus_stop");
+  const roles = parseXml((await run()).xml).children.find((e) => e.attrs.id === "30").children.filter((c) => c.name === "member").map((c) => [c.attrs.ref, c.attrs.role]);
+  assert.deepEqual(roles, [["1", "stop"], ["4", "stop"], ["3", "platform"], ["7", ""]]); // the order does not move
+});
+
+test("a role stop_exit_only stays exit only", async () => {
+  line();
+  answer.objects[1].tags = { public_transport: "platform", name: "Charlotte Corday" }; // n2, not on the road
+  answer.relations[0].members[0] = member("node", 2, "stop_exit_only");
+  const roles = parseXml((await run()).xml).children.find((e) => e.attrs.id === "30").children.filter((c) => c.name === "member").map((c) => c.attrs.role);
+  assert.equal(roles[0], "platform_exit_only");
+});
+
+test("the roads of the stops not available: those in doubt are left as they are", async () => {
+  line();
+  answer.objects[2].tags = { public_transport: "stop_position", name: "Gare" };
+  const fetchOk = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    if (String(url).includes("overpass") && decodeURIComponent(init.body.slice(5)).includes("way(bn)")) return new Response("{}", { status: 400 });
+    return fetchOk(url, init);
+  };
+  const out = read((await run()).xml);
+  assert.ok(!out.has("n3"));
 });
 
 test("no relation of the network", async () => {
