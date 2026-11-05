@@ -9,7 +9,7 @@
 //   stop_position on the road this stop's routes use (see platforms.locateStop).
 
 import { Grid, latlon } from "./geo.js";
-import { nameKey } from "./naming.js";
+import { stopKey } from "./naming.js";
 import { settings } from "./settings.js";
 import { setIn } from "./util.js";
 
@@ -68,7 +68,7 @@ export function matchStops(stopRows, agencies, osm) {
   const th = settings.thresholds;
   const holders = holdersOf(osm);
   const df = new Map(stopRows.map((s) => [s.stop_id, s]));
-  const keys = new Map(stopRows.map((s) => [s.stop_id, nameKey(s.stop_name)]));
+  const keys = new Map(stopRows.map((s) => [s.stop_id, stopKey(s.stop_name)]));
   const reach = Math.max(th.holder_m, th.platform_far_m, th.platform_same_name_m);
   const grid = new Grid(stopRows, latlon, Math.max(reach, th.sibling_m));
   const platforms = new Map(stopRows.map((s) => [s.stop_id, []]));
@@ -82,7 +82,7 @@ export function matchStops(stopRows, agencies, osm) {
       if (!byName.has(key) || d < byName.get(key)) byName.set(key, d);
     }
     const ranked = [...byName].sort((a, b) => a[1] - b[1]);
-    const osmKey = p.name === null ? null : nameKey(p.name);
+    const osmKey = p.name === null ? null : stopKey(p.name);
     for (const [s, d] of near) {
       const key = keys.get(s.stop_id);
       const other = (ranked[0][0] !== key ? ranked[0][1] : ranked[1]?.[1]) ?? Infinity;

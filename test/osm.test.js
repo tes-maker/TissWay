@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import "./helpers.js";
-import { Store, fromOverpass, parseXml, writeOsm } from "../src/osm.js";
+import { Store, cleanGtfsId, cleanGtfsIds, fromOverpass, parseXml, writeOsm } from "../src/osm.js";
 import { enrich } from "../src/platforms.js";
 import { reviewRefs } from "../src/ref_review.js";
 import { nearestPairs, feedTags } from "../src/platform_tags.js";
@@ -95,7 +95,7 @@ test("writeOsm: gtfs:stop_id follows the network holding ref", () => {
 
 test("Mont Coco: the id of the stop holding ref, whichever networks were run, the other one stays in its refs", () => {
   const TWISTO = "FR:14118:ZE:chuo02:ATOUMOD029", NOMAD = "FR:14118:ZE:1151928:ATOUMOD040", FEED = "FR-NOR-Atoumod";
-  const COCO = { alt_name: "Mont Coco", bench: "no", bin: "no", bus: "yes", departures_board: "timetable", "gtfs:stop_code:FR-NOR-Atoumod:Nomad": "14CAE74A",
+  const COCO = { alt_name: "Mont Coco", bench: "no", bin: "no", departures_board: "timetable", "gtfs:stop_code:FR-NOR-Atoumod:Nomad": "14CAE74A",
     "gtfs:stop_id": NOMAD, highway: "bus_stop", name: "Mont Coco", network: "Twisto;Nomad Car", "network:wikidata": "Q3537947;Q98131290",
     "network:wikipedia": "fr:Transports en commun de Caen;fr:Nomad (réseau)", operator: "RATP Dev Caen la mer", public_transport: "platform", ref: "chuo02",
     "ref:FR:Atoumod": TWISTO, "ref:FR:Atoumod:Nomad": NOMAD, "ref:Nomad": "14CAE74A", shelter: "no", tactile_paving: "no", wheelchair: "no" };
@@ -180,11 +180,30 @@ test("feedTags names network-specific tags", () => {
 test("feedTags", () => {
   configure();
   const t = feedTags({ name: "Gare", route_ref: "10;2" }, { stop_id: "S", stop_name: "Gare", route_ref: new Set(["3"]), wheelchair_boarding: "1" }, "F");
-  assert.deepEqual(t, { name: "Gare", route_ref: "2;3;10", "gtfs:stop_id:F": "S", bus: "yes", wheelchair: "yes" });
+  assert.deepEqual(t, { name: "Gare", route_ref: "2;3;10", "gtfs:stop_id:F": "S", wheelchair: "yes" });
+  assert.equal(feedTags({ name: "Gare", bus: "yes" }, { stop_id: "S", stop_name: "Gare", route_ref: new Set() }, "F").bus, undefined);
 });
 
 test("feedTags keeps the GTFS stop name when it differs from the OSM name", () => {
   configure();
   const t = feedTags({ name: "Gare historique" }, { stop_id: "S", stop_name: "Gare", route_ref: new Set(), wheelchair_boarding: "" }, "F");
   assert.equal(t["gtfs:stop_name:F"], "Gare");
+});
+
+test("GTFS ids repeating their prefix", () => {
+  assert.equal(cleanGtfsId("NOMAD:NOMAD:2686$1072220$1618"), "NOMAD:2686$1072220$1618");
+  assert.equal(cleanGtfsId("NOMAD:NOMAD:NOMAD:1"), "NOMAD:1");
+  for (const id of ["NOMAD:2686$1072220$1618", "TWISTO:CALC_480618", "FR:14118:14118:X", "ATOUMOD040:Line:1004446:LOC", "1:1:2", "NOMAD:NOMADE:1", "NOMAD:NOMAD"]) assert.equal(cleanGtfsId(id), id);
+  const fine = { "gtfs:shape_id:F": "NOMAD:1", name: "NOMAD:NOMAD:1" };
+  assert.equal(cleanGtfsIds(fine), fine);
+  assert.deepEqual(cleanGtfsIds({ "gtfs:shape_id:F": "NOMAD:NOMAD:1;NOMAD:1; NOMAD:NOMAD:2", "gtfs:trip_id:sample:F": "A:A:t", "gtfs:stop_id": "B:B:s", "gtfs:route_id": "C:C:r", ref: "D:D:x" }),
+    { "gtfs:shape_id:F": "NOMAD:1;NOMAD:2", "gtfs:trip_id:sample:F": "A:t", "gtfs:stop_id": "B:s", "gtfs:route_id": "C:r", ref: "D:D:x" });
+});
+
+test("GTFS ids are corrected when OSM is read, and the object flagged", () => {
+  const read = fromOverpass([{ type: "relation", id: 1, members: [], tags: { "gtfs:shape_id:F": "NOMAD:NOMAD:1" } }, { type: "relation", id: 2, members: [], tags: { "gtfs:shape_id:F": "NOMAD:1" } }, { type: "node", id: 3, lat: 1, lon: 1 }]);
+  assert.equal(read.r1.tags["gtfs:shape_id:F"], "NOMAD:1");
+  assert.equal(read.r1.correctedIds, true);
+  assert.equal(read.r2.correctedIds, undefined);
+  assert.equal(read.n3.correctedIds, undefined);
 });

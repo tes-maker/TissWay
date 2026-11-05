@@ -1,7 +1,7 @@
 // Names: network of a GTFS agency, stop labels used in relation names, relation names.
 //
 // Titles of the lines: route "Bus 12: VILLE Arret → VILLE Arret", "Bus 12: VILLE Arret → X → VILLE Arret" for variants sharing their termini; route_master
-// "Bus 12: VILLE Arret ↔ VILLE Arret" ("A1 / A2 ↔ B" when several origins share a terminus). The stops are labelled by routeLabel; settings.stop_names = "town" renames the stops themselves (townedName).
+// "Bus 12: VILLE Arret ↔ VILLE Arret" ("A1 / A2 ↔ B" when several origins share a terminus). The stops are labelled by routeLabel. The stops themselves get name = "Arret" and official_name = "VILLE - Arret" (stopNames).
 
 import { settings } from "./settings.js";
 import { counter, mostCommon } from "./util.js";
@@ -45,8 +45,41 @@ export function accentsFrom(name, other) {
   });
 }
 
-/** Stop name as written on OSM objects: trimmed, single spaces. */
-export const cleanStopName = (name) => String(name).trim().split(/\s+/).join(" ");
+const ELISION = /(?<![\p{L}\p{N}])(c|d|j|l|m|n|s|t|qu|jusqu|lorsqu|puisqu)\s*(['\u2019])\s*(?=\p{L})/giu;
+const SAINT_HYPHEN = /(?<![\p{L}\p{N}])(saint|sainte|st|ste)(?: -(?=\S)|- )(?=\p{L})/giu;
+/** Between two digits and without a space, ":" and "," belong to a number: "12:30", "1,5". */
+const unlessNumber = (spaced) => (match, at, text) => (match.length === 1 && /\d/.test(text[at - 1] ?? "") && /\d/.test(text[at + 1] ?? "") ? match : spaced);
+
+/** Stop name as written on OSM objects, whatever the punctuation of the source: " - " between two parts ("A -B", "A\u2013 B", "A -- B", "A : B"), a word
+ * hyphen left alone ("Saint-Malo", "Saint- Malo" repaired), "A, B", "A (B)", "L'Église" and "Av. de", single spaces, no separator at either end. A ";"
+ * would make it a list in OSM: it becomes ",". "/" is left as it is: "PACY S/ EURE", "Mairie/Eglise" and "A / B" do not follow one rule. Run again on
+ * its own result, it changes nothing. */
+export function cleanStopName(name) {
+  const source = String(name).trim();
+  const cleaned = source.normalize("NFC")
+    .replace(/[\u200b-\u200d\u2060\ufeff]/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/[\u2010\u2011]/g, "-")
+    .replace(ELISION, "$1$2")
+    .replace(/\s*:\s*/g, unlessNumber(" - "))
+    .replace(/\s*[\u2012-\u2015\u2212]+\s*/g, " - ")
+    .replace(/\s*-(?:\s*-)+\s*/g, " - ")
+    .replace(SAINT_HYPHEN, "$1-")
+    .replace(/ -(?=\S)|(?<=\S)- /g, " - ")
+    .replace(/\s*;+\s*/g, ", ")
+    .replace(/\s*,[\s,]*/g, unlessNumber(", "))
+    .replace(/\(\s*\)|\[\s*\]/g, "")
+    .replace(/([([])\s+/g, "$1")
+    .replace(/\s+([)\]])/g, "$1")
+    .replace(/(?<=[\p{L}\p{N}])([([])/gu, " $1")
+    .replace(/([)\]])(?=[\p{L}\p{N}])/gu, "$1 ")
+    .replace(/\s+\.(?=\s|$)/g, ".")
+    .replace(/(\p{L}{2,})\.(?=\p{L}{2,})/gu, "$1. ")
+    .replace(/(?:,? +- +,? *)+/g, " - ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,:-]+|[\s,:-]+$/g, "");
+  return cleaned || source;
+}
 
 // --- networks ---------------------------------------------------------------------------------------------
 
@@ -82,7 +115,7 @@ function stripLocality(ville, name) {
     // "Mont aux Malades", "NOTRE DAME D'ESTREES"). "[ :-]" in the negative lookahead makes [ :-]* consume every separator.
     starts.push(`${words.slice(0, n).join("[ -]+")}(?=$|[ :][ :-]*(?![ :-]|/|S/|D'|(?:${LINK_WORDS}|${words[n]})\\b))`);
   }
-  const prefix = new RegExp(`^(?:${starts.join("|")})(?![\\p{L}\\p{N}])[ :\u2013\u2014-]*`, "iu").exec(unaccent(name));
+  const prefix = new RegExp(`^(?:${starts.join("|")})(?![\\p{L}\\p{N}])[ :,\u2013\u2014-]*`, "iu").exec(unaccent(name));
   return prefix ? name.slice(prefix[0].length) : name;
 }
 
@@ -121,10 +154,11 @@ function saysTown(town, name) {
 
 /** Does the name begin with a place in capitals, maybe not the one the position gives: a former commune, or just over the boundary?
  * "CAEN Chemin Vert", "LE THEIL-SUR-HUISNE - École", "VENDEUVRES morieres", "MEZIDON-CANON: college", "COURTONNE LES 2 EGLISES: le bourg". */
-const CAPITALS_FIRST = /^\p{Lu}[\p{Lu}'\u2019.\d/ -]{2,}?\s*:|^\p{Lu}[\p{Lu}'\u2019./ -]{2,}?\s[-\u2013\u2014]\s|^\p{Lu}[\p{Lu}'\u2019.-]{2,}(?: \p{Lu}[\p{Lu}'\u2019.-]*)*\s+(?:\p{Lu}[\p{Ll}'\u2019]|\p{Ll})/u;
+const CAPITALS_FIRST = /^\p{Lu}[\p{Lu}'\u2019.\d/ -]{2,}?\s*:|^\p{Lu}[\p{Lu}'\u2019.\d/ -]{2,}?\s[-\u2013\u2014]\s|^\p{Lu}[\p{Lu}'\u2019.-]{2,}(?: \p{Lu}[\p{Lu}'\u2019.-]*)*\s+(?:\p{Lu}[\p{Ll}'\u2019]|\p{Ll})/u;
 
 const TAG_LIMIT = 255; // characters in an OSM tag value
 const CAPITALS_THEN_SEPARATOR = /^(\p{Lu}[\p{Lu}'\u2019.\d/ -]{2,}?)(?:\s*:|\s[-\u2013\u2014])\s*/u;
+const CAPITALS_THEN_WORDS = /^(\p{Lu}[\p{Lu}'\u2019.-]{2,}(?: \p{Lu}[\p{Lu}'\u2019.-]*)*)\s+(?=\p{Lu}[\p{Ll}'\u2019]|\p{Ll})/u;
 
 /** Stop in the title of a line, "VILLE Arret", places being the names of the place of the stop, most precise first. A town the stop name says
  * already is moved first, never repeated; when it cannot be taken out ("Hauts de Mondeville") or the name begins with another place in
@@ -140,22 +174,50 @@ export function routeLabel(places, name) {
   return `${upperTown(towns[0])} ${name}`;
 }
 
-/** The name of a stop in the form "CAEN - Gare" (settings.stop_names = "town"), its town moved first if it says it elsewhere. A name saying its
- * town in a way that cannot be taken out stays as it is. Run again on its own result, it changes nothing. */
-export function townedName(places, name) {
+/** The place in capitals a name begins with and what follows it, null if it does not: "CAEN - Gare", "CAEN Chemin Vert", "MEZIDON-CANON: college". */
+function capitalsFirst(name) {
+  if (!CAPITALS_FIRST.test(name)) return null;
+  const m = CAPITALS_THEN_SEPARATOR.exec(name) ?? CAPITALS_THEN_WORDS.exec(name);
+  const rest = m && name.slice(m[0].length).trim();
+  return rest ? { place: m[1], rest } : null;
+}
+
+/** Comparison key of the stop itself, whatever a place in capitals before it: "MONDEVILLE - Charlotte Corday" is the stop "Charlotte Corday". */
+export function stopKey(name) {
+  const m = CAPITALS_THEN_SEPARATOR.exec(name || "");
+  return nameKey(m && name.slice(m[0].length) ? name.slice(m[0].length) : name);
+}
+
+/** {name, official_name} of a stop: {name: "Charlotte Corday", official_name: "MONDEVILLE - Charlotte Corday"}, whether the town is in the name
+ * given or not. A town that cannot be taken out ("Hauts de Mondeville"), a name that is only the town, or no known town: no official_name, it
+ * would say nothing more. Capitals at the start that are not the town of the position are taken out when isPlace(capitals) confirms a place:
+ * a former commune, or just over the boundary; "CHU Côte de Nacre" stays whole. */
+export async function stopNames(places, name, isPlace = async () => false) {
+  const named = (town, rest) => {
+    const stop = cleanStopName(rest.replace(/^\(([^()]*)\)$/, "$1")); // "CAEN (Gare)"
+    return { name: stop, official_name: `${upperTown(town)} - ${stop}` };
+  };
   const towns = toList(places);
   for (const town of towns) {
     const rest = withoutTown(town, name);
-    if (rest !== null) return rest ? `${upperTown(town)} - ${rest}` : upperTown(town);
+    if (rest !== null) return rest ? named(town, rest) : { name };
   }
-  if (!towns.length || CAPITALS_FIRST.test(name) || towns.some((t) => saysTown(t, name))) return name;
-  return `${upperTown(towns[0])} - ${name}`;
+  if (CAPITALS_FIRST.test(name)) {
+    const other = capitalsFirst(name);
+    return other && (await isPlace(other.place)) ? named(other.place, other.rest) : { name };
+  }
+  if (!towns.length || towns.some((t) => saysTown(t, name))) return { name };
+  return named(towns[0], name);
 }
 
 /** Title of a route relation or a route_master. A ":" in a stop name would be read as the end of the "<Prefix> <ref>:" part (settings.prefixes). OSM takes 255
  * characters in a tag: alternatives are tried from the most complete. */
 export function routeName(mode, ref, ...labels) {
-  const prefix = settings.prefixes[mode] || mode[0].toUpperCase() + mode.slice(1);
+  return routeTitle(settings.prefixes[mode] || mode[0].toUpperCase() + mode.slice(1), ref, ...labels);
+}
+
+/** The same, with what comes before the ref. */
+export function routeTitle(prefix, ref, ...labels) {
   const titles = labels.map((label) => {
     const text = label.replace(/\s*:\s*/g, " - ");
     return ref ? `${prefix} ${ref}: ${text}` : `${prefix}: ${text}`;

@@ -2,7 +2,7 @@
 // with the nearest OSM platform (within max_m, one platform per stop at most), to be reviewed in JOSM.
 //
 // Tags set: gtfs:stop_id:<feed>, gtfs:stop_name:<feed>, route_ref (routes of the network added to the existing values), and
-// wheelchair / bus when missing. The existing name is left unchanged.
+// wheelchair when missing. A bus=yes is removed (platforms.dropBusTag). The existing name is left unchanged.
 
 import { feedCodeOf } from "./detect.js";
 import { Grid, bbox, latlon } from "./geo.js";
@@ -12,14 +12,14 @@ import { Store, completeWayNodes, platformsIn, writeOsm } from "./osm.js";
 import { stopNetworks } from "./pipeline.js";
 import { reviewRefs } from "./ref_review.js";
 import { settings } from "./settings.js";
-import { addStopValue, nameNumberedNetworkTags, nameNumberedRefs, networkKeyFor } from "./platforms.js";
+import { addStopValue, dropBusTag, nameNumberedNetworkTags, nameNumberedRefs, networkKeyFor } from "./platforms.js";
 import { osmPlatforms } from "./stops.js";
 import { log, sameTags, sortedBy } from "./util.js";
 
 const WHEELCHAIR = { 1: "yes", 2: "no" };
 
 /** GTFS stops served by the network, each with its route_ref (Set of route numbers). */
-async function networkStops(feed, network) {
+export async function networkStops(feed, network) {
   const networks = agencyNetworks(await feed.agency());
   const agencies = new Set(Object.entries(networks).filter(([, t]) => t.network.toLowerCase() === network.toLowerCase()).map(([a]) => a));
   if (!agencies.size) throw new Error(`Unknown network "${network}". Available: ${[...new Set(Object.values(networks).map((t) => t.network))].sort().join(", ")}`);
@@ -64,7 +64,7 @@ export function feedTags(tags, stop, feedId, network = tags.network) {
   }
   const refs = new Set([...(t.route_ref || "").split(";").filter(Boolean), ...stop.route_ref]);
   if (refs.size) t.route_ref = sortedBy(refs, refSortKey).join(";");
-  t.bus ??= "yes";
+  dropBusTag(t);
   if (WHEELCHAIR[stop.wheelchair_boarding]) t.wheelchair ??= WHEELCHAIR[stop.wheelchair_boarding];
   return t;
 }
@@ -86,7 +86,7 @@ export async function runPlatforms(feed, { network, feedId = null, max_m = 30, o
     if (!matches.has(stop.stop_id)) continue;
     const id = matches.get(stop.stop_id)[0];
     const tags = feedTags(osm[id].tags, stop, suffix, network);
-    if (!sameTags(tags, osm[id].tags)) obj.set(id, { ...osm[id], tags });
+    if (!sameTags(tags, osm[id].tags) || osm[id].correctedIds) obj.set(id, { ...osm[id], tags });
   }
   await completeWayNodes(obj);
   const review = reviewRefs(obj, { ...await stopNetworks(feed, agencyNetworks(await feed.agency())), stops: await feed.stops(), feed: suffix });

@@ -12,7 +12,7 @@
 //   stop_position of the opposite stop may be within reach (reusable);
 // - a new stop_position only carries public_transport=stop_position, <vehicle>=yes, name and, on a two-way way,
 //   direction=forward|backward. An existing one keeps its tags: only the missing ones are added, except name,
-//   replaced by the official GTFS name. A direction set here is removed if it turns out to be served both ways;
+//   replaced by the name of the stop. A direction set here is removed if it turns out to be served both ways;
 // - the platform is chosen on the kerb side of the way (settings.driving_side) in the direction of travel, judged
 //   on the road segment next to the platform (sideSegment), and for the GTFS stop on its segment (stopSegment);
 // - a platform found with the extended reach is only used on the kerb side and next to the way (verified);
@@ -25,6 +25,7 @@
 import { feedKey } from "./existing.js";
 import { dist, interpolate, latlon, lineDistance, project, rightOf, xy } from "./geo.js";
 import { refSortKey } from "./gtfs.js";
+import { stopKey } from "./naming.js";
 import { isNew, newKey } from "./osm.js";
 import { settings } from "./settings.js";
 import { listIn, log, minBy, sameTags, sortedBy } from "./util.js";
@@ -41,7 +42,7 @@ export const kerbSide = (p, a, b) => rightOf(p, a, b) !== (settings.driving_side
  * or a new node at pos on the segment a -> b (node keys). distance: GTFS stop -> way. */
 export const makeSpot = (wayIndex, pos, distance, { node = null, a = null, b = null } = {}) => ({ wayIndex, pos, distance, node, a, b });
 
-function isStopPositionFor(tags, vehicle = "bus") {
+export function isStopPositionFor(tags, vehicle = "bus") {
   if (tags.public_transport !== "stop_position" || tags[vehicle] === "no") return false;
   return tags[vehicle] === "yes" || !OTHER_VEHICLES.some((v) => tags[v] === "yes");
 }
@@ -90,15 +91,28 @@ function* stopPositionsOn(obj, ways, run, vehicle) {
 
 const smallest = (found) => (found.length ? minBy(found).slice(1) : null);
 
+/** May the stop_position at p be the one of the first or last stop at pos? terminus: {name of the stop, others: positions of the next stops}. It may be
+ * further than the usual reach: then a name, if any, must be the one of the stop, and it must be closer to this stop than to the next one. */
+export function fitsTerminus(tags, p, pos, terminus) {
+  return (!tags.name || stopKey(tags.name) === stopKey(terminus.name)) && !terminus.others.some((other) => dist(p, other) < dist(p, pos));
+}
+
+/** Is the stop_position n at p within reach of the stop at pos, projected at target? */
+function inReach(obj, n, p, pos, target, terminus) {
+  const th = settings.thresholds, d = dist(p, target);
+  if (d > (terminus ? th.terminus_m : th.stop_position_reuse_m)) return false;
+  return d <= th.stop_position_reuse_m || fitsTerminus(obj.get(n).tags, p, pos, terminus);
+}
+
 /** [way index, node] of the existing stop_position to reuse for a stop at pos whose projection is target, or null.
  * Within stop_position_shared_m of target it is always reused. Further, up to stop_position_reuse_m, it is left to a
  * rival across the road whose projection is closer to it: a new stop_position is then created in front of this stop. */
-function reusable(obj, ways, run, pos, target, rivals, vehicle) {
+function reusable(obj, ways, run, pos, target, rivals, vehicle, terminus) {
   const th = settings.thresholds, found = [];
   let points = null; // computed only when needed
   for (const [j, n, p] of stopPositionsOn(obj, ways, run, vehicle)) {
+    if (!inReach(obj, n, p, pos, target, terminus)) continue;
     const d = dist(p, target);
-    if (d > th.stop_position_reuse_m) continue;
     if (d > th.stop_position_shared_m) {
       points ??= rivalPoints(obj, run.map((k) => ways[k]), pos, target, rivals);
       if (points.some((q) => dist(p, q) < d)) continue; // the rival's stop_position
@@ -111,10 +125,10 @@ function reusable(obj, ways, run, pos, target, rivals, vehicle) {
 /** [way index, node] of the existing stop_position nearest to the platform at pos (within stop_position_reuse_m of its
  * projection target), or null. One clearly closer to the platform of a rival stop (rivals: positions of OSM platforms)
  * is left to it. */
-function nearestToPlatform(obj, ways, run, pos, target, rivals, vehicle) {
+function nearestToPlatform(obj, ways, run, pos, target, rivals, vehicle, terminus) {
   const th = settings.thresholds, found = [];
   for (const [j, n, p] of stopPositionsOn(obj, ways, run, vehicle)) {
-    if (dist(p, target) > th.stop_position_reuse_m) continue;
+    if (!inReach(obj, n, p, pos, target, terminus)) continue;
     const d = dist(p, pos);
     if (!rivals.some((r) => dist(p, r) < d - th.stop_position_shared_m)) found.push([d, j, n]);
   }
@@ -124,9 +138,9 @@ function nearestToPlatform(obj, ways, run, pos, target, rivals, vehicle) {
 /** Spot of the stop_position of a GTFS stop at pos on the first run of ways, from ways[start], passing within max_m
  * (default stop_position_m) of it, or null. Nothing is changed (see materialize). rivals: positions of the GTFS stops
  * that may own an existing stop_position nearby. platform: pos is the OSM platform used, rivals the OSM platforms of
- * the rival stops. */
-export function locateStop(obj, ways, pos, { start = 0, max_m = null, rivals = [], vehicle = "bus", platform = false } = {}) {
-  const limit = max_m ?? settings.thresholds.stop_position_m;
+ * the rival stops. terminus: for the first or last stop, see fitsTerminus; the reach is then terminus_m. */
+export function locateStop(obj, ways, pos, { start = 0, max_m = null, rivals = [], vehicle = "bus", platform = false, terminus = null } = {}) {
+  const limit = max_m ?? (terminus ? settings.thresholds.terminus_m : settings.thresholds.stop_position_m);
   let best = null;
   const run = [];
   for (let i = start; i < ways.length; i++) {
@@ -147,7 +161,7 @@ export function locateStop(obj, ways, pos, { start = 0, max_m = null, rivals = [
   const nodes = obj.get(ways[i]).nodes;
   const pa = latlon(obj.get(nodes[k])), pb = latlon(obj.get(nodes[k + 1]));
   const target = interpolate(pa, pb, t);
-  const reuse = (platform ? nearestToPlatform : reusable)(obj, ways, run, pos, target, rivals, vehicle);
+  const reuse = (platform ? nearestToPlatform : reusable)(obj, ways, run, pos, target, rivals, vehicle, terminus);
   if (reuse) return makeSpot(reuse[0], latlon(obj.get(reuse[1])), d, { node: reuse[1] });
   const length = dist(pa, pb);
   t = length > 2 ? Math.min(Math.max(t, 1 / length), 1 - 1 / length) : 0.5; // not on top of an existing node
@@ -337,11 +351,17 @@ export function stopRef(stop, stopId) {
 
 const PHYSICAL_TAGS = new Set(["public_transport", "highway", "bus", "trolleybus", "wheelchair"]); // survey data wins
 
-/** Platform tags taken from the GTFS. <vehicle>=yes: PTNA's platform check requires it, whatever highway=bus_stop implies. */
+/** Remove bus=yes from a platform: PTv2 only asks for it on stop_positions. Kept when it tells the bus apart from another mode using the platform. */
+export function dropBusTag(t) {
+  const shared = t.railway || t.trolleybus === "yes" || t.coach === "yes" || OTHER_VEHICLES.some((v) => t[v] === "yes");
+  if (t.bus === "yes" && !shared) delete t.bus;
+}
+
+/** Platform tags taken from the GTFS. No bus=yes (see dropBusTag); trolleybus=yes and coach=yes say what highway=bus_stop does not. */
 export function stopTags(stop, stopId, network, mode = "bus") {
-  const vehicle = VEHICLE[mode] || "bus";
-  const tags = { public_transport: "platform", highway: "bus_stop", [vehicle]: "yes", ...(mode === "coach" ? { coach: "yes" } : {}),
+  const tags = { public_transport: "platform", highway: "bus_stop", ...(mode === "trolleybus" || mode === "coach" ? { [mode]: "yes" } : {}),
     name: stop.stop_name, ...network, [feedKey("gtfs:stop_id")]: stopId };
+  if (stop.official_name) tags.official_name = stop.official_name;
   if (stop.stop_code) tags[feedKey("gtfs:stop_code")] = stop.stop_code;
   for (const t of settings.stop_ref_tags) tags[t] = stopId;
   const ref = stopRef(stop, stopId);
@@ -649,7 +669,7 @@ function changeOwner(t, suffix, old) {
 }
 
 /** Complete an existing OSM platform with the GTFS / network tags without overwriting another network's, except name, replaced by the
- * official GTFS name, and the physical tags, only added when missing. The network name is numbered; its metadata and stop code use its name. ref and
+ * name of the stop, official_name likewise, and the physical tags, only added when missing. The network name is numbered; its metadata and stop code use its name. ref and
  * the tags holding a stop_id belong to the network owning the stop (network=*): the others use ref:<network>, never a number. A physical stop is
  * one platform for all its networks, each with its own ids: gtfs:stop_id:<feed> lists those of the networks, separated by ";".
  * sizes: see takesOver. */
@@ -677,7 +697,7 @@ export function enrich(obj, key, tags, sizes = null, ofStop = new Map()) {
     suffix = "";
   }
   for (const [k, v] of Object.entries(tags)) {
-    if (k === "name") t[k] = v;
+    if (k === "name" || k === "official_name") t[k] = v;
     else if (k === "highway" && key[0] === "w") t.highway ??= "platform"; // highway=bus_stop is for nodes only (wiki, PTNA)
     else if (k.startsWith("network")) continue;
     else if (PHYSICAL_TAGS.has(k)) t[k] ??= v;
@@ -688,13 +708,14 @@ export function enrich(obj, key, tags, sizes = null, ofStop = new Map()) {
     }
     else addTag(t, k, v);
   }
+  dropBusTag(t);
 }
 
 /** The only tags of a stop_position: the stop's data (ref, network, operator...) is on the platform. */
 export const stopPositionTags = (name, vehicle = "bus") => ({ [vehicle]: "yes", name, public_transport: "stop_position" });
 
 /** Complete the tags of an existing OSM stop_position: its own tags are kept, only the missing ones are added, except
- * name, replaced by the official GTFS name like on the platform. */
+ * name, replaced by the name of the stop like on the platform. */
 export function setStopPositionTags(obj, key, name, vehicle = "bus") {
   const old = obj.get(key).tags;
   const tags = { ...stopPositionTags(name, vehicle), ...old, [vehicle]: "yes", name, public_transport: "stop_position" };

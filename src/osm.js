@@ -49,10 +49,33 @@ export class Store {
 // --- reading from Overpass --------------------------------------------------------------------------------
 
 /** {key: object} of Overpass JSON elements. The center of a way (out center) is kept but not written out. */
+const GTFS_ID_KEY = /^gtfs:(?:shape|trip|route|stop)_id(?::|$)/;
+
+/** A GTFS id with its first part repeated, as some imports left them in OSM: "NOMAD:NOMAD:2686$1072220$1618" -> "NOMAD:2686$1072220$1618". Only a
+ * part starting with a letter, at the start: "FR:14118:14118:X" may be what the feed says. */
+export const cleanGtfsId = (id) => id.replace(/^([A-Za-z][\w-]*)(?::\1)+(?=:)/, "$1");
+
+/** Tags with their GTFS ids corrected (cleanGtfsId), each id once: the same object if there is nothing to correct. */
+export function cleanGtfsIds(tags) {
+  let out = tags;
+  for (const [k, v] of Object.entries(tags)) {
+    if (!GTFS_ID_KEY.test(k)) continue;
+    const ids = v.split(";").map((id) => id.trim());
+    const cleaned = ids.map(cleanGtfsId);
+    if (cleaned.every((id, i) => id === ids[i])) continue;
+    if (out === tags) out = { ...tags };
+    out[k] = [...new Set(cleaned)].join(";");
+  }
+  return out;
+}
+
+/** The objects of an Overpass answer, their GTFS ids corrected as soon as they are read, so that they compare with the feed. Such an object has
+ * correctedIds set: it has to go in the file even when nothing else changes on it. */
 export function fromOverpass(elements) {
   const out = {};
   for (const e of elements) {
-    const o = { version: String(e.version ?? ""), tags: e.tags || {} };
+    const tags = cleanGtfsIds(e.tags || {});
+    const o = { version: String(e.version ?? ""), tags, ...(tags !== e.tags && e.tags ? { correctedIds: true } : {}) };
     if (e.type === "node") Object.assign(o, { lat: e.lat, lon: e.lon });
     if (e.type === "way") o.nodes = (e.nodes || []).map((n) => `n${n}`);
     if (e.type === "relation") o.members = (e.members || []).map((m) => [`${KIND[m.type]}${m.ref}`, m.role || ""]);
@@ -77,6 +100,12 @@ export const readWays = (keys) => inBatches(numericIds(keys, "w"), (ids) => `way
 /** The nodes with these keys. */
 const readNodes = (keys) => inBatches(numericIds(keys, "n"), (ids) => `node(id:${ids});out meta;`);
 
+/** The nodes and ways with these keys, ways with their center. */
+export async function readObjects(keys) {
+  const list = [...keys];
+  return { ...(await readNodes(list)), ...(await inBatches(numericIds(list, "w"), (ids) => `way(id:${ids});out meta center;`)) };
+}
+
 /** Relations containing these ways. */
 export const parentRelations = (keys) => inBatches(numericIds(keys, "w"), (ids) => `way(id:${ids});rel(bw);out meta;`);
 
@@ -87,6 +116,12 @@ export const platformsIn = (box) => {
   const b = bboxText(box);
   return overpass(`(node[highway=bus_stop](${b});node[public_transport=platform](${b});way[public_transport=platform](${b}););out meta center;`)
     .then(fromOverpass);
+};
+
+/** The stop_positions within radius metres of these points [lat, lon], the roads they are on, and the nodes of these roads. */
+export const stopPositionsAround = (points, radius) => {
+  const around = points.map(([lat, lon]) => `node[public_transport=stop_position](around:${radius},${lat},${lon});`).join("");
+  return overpass(`(${around})->.s;.s out meta;way(bn.s)[highway]->.w;.w out meta;node(w.w);out meta;`).then(fromOverpass);
 };
 
 /** Route relations of these modes with a member in a bbox, and their route masters. */

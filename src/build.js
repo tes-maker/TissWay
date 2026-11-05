@@ -4,7 +4,8 @@ import { feedKey, joinIds, updatedMaster, updatedRelation } from "./existing.js"
 import { latlon, xy } from "./geo.js";
 import { masterLabel, routeLabel, routeName, tripLabel } from "./naming.js";
 import { isNew, newKey } from "./osm.js";
-import { VEHICLE, choosePlatform, completeRouteRef, fixSide, kerbSide, locateStop, materialize, onKerb, roadDistance, sideSegment, stopSegment } from "./platforms.js";
+import { linkNode } from "./splitting.js";
+import { VEHICLE, choosePlatform, completeRouteRef, fixSide, kerbSide, locateStop, makeSpot, materialize, onKerb, roadDistance, sideSegment, stopSegment } from "./platforms.js";
 import { settings } from "./settings.js";
 import { counter, dedupe, listIn, log, unique } from "./util.js";
 import { chooseVias } from "./via.js";
@@ -46,10 +47,10 @@ class LineBuilder {
 
   /** Spot of the stop_position of stopId (at pos, default: the GTFS position) from ways[start]; beyond stop_position_m, at
    * the nearest point of the way (reported). */
-  locate(ways, stopId, start, pos = null) {
-    const at = pos || latlon(this.stops.df.get(stopId));
+  locate(ways, stopId, start, terminus = null) {
+    const at = latlon(this.stops.df.get(stopId));
     const rivals = this.stops.positions(this.stops.rivals.get(stopId) || []);
-    const options = { start, rivals, vehicle: this.vehicle };
+    const options = { start, rivals, vehicle: this.vehicle, terminus };
     return locateStop(this.obj, ways, at, options) ?? locateStop(this.obj, ways, at, { ...options, max_m: Infinity });
   }
 
@@ -85,20 +86,46 @@ class LineBuilder {
     return choice;
   }
 
+  /** The members of a complete relation, as they are: only the tags of its stops are completed (see reuse.completeRelation). */
+  completeMembers(v) {
+    const { obj, stops } = this;
+    v.seq.forEach((stopId, i) => {
+      const { stop, platform, way, pos } = v.complete[i];
+      materialize(obj, v.ways, makeSpot(way, latlon(obj.get(stop)), 0, { node: stop }), stops.df.get(stopId).stop_name, this.vehicle);
+      if (this.mode === "coach") obj.edit(stop).tags.coach = "yes";
+      completeRouteRef(obj, stop, this.route.route_short_name);
+      completeRouteRef(obj, platform, this.route.route_short_name);
+      if (!this.assignments.has(stopId)) this.assignments.set(stopId, new Map());
+      this.assignments.get(stopId).set(platform, [this.network, pos, this.mode, true]);
+    });
+    return this.existing.routes[v.kept_from].members;
+  }
+
+  /** What the first or last of the n stops of a variant is compared with (see platforms.fitsTerminus), null for the others. */
+  terminusOf(v, i) {
+    if (i !== 0 && i !== v.seq.length - 1) return null;
+    const next = v.seq[i === 0 ? 1 : i - 1];
+    const others = next === undefined || next === v.seq[i] ? [] : [latlon(this.stops.df.get(next))];
+    return { name: this.stops.df.get(v.seq[i]).stop_name, others };
+  }
+
   variantMembers(v) {
-    const { obj, stops } = this, ways = v.ways, members = [];
-    let start = 0;
-    for (const stopId of v.seq) {
-      let spot = this.locate(ways, stopId, start);
+    if (v.complete) return this.completeMembers(v);
+    const { obj, stops } = this, members = [];
+    let { ways } = v;
+    let start = 0, first = null, last = null;
+    for (const [i, stopId] of v.seq.entries()) {
+      const terminus = this.terminusOf(v, i);
+      let spot = this.locate(ways, stopId, start, terminus);
       const { platform, dataId, pos, kerb } = this.choose(stopId, ways, spot);
       // the stop_position goes in front of the platform actually used: an existing OSM platform is more accurate than
       // the GTFS position (often tens of metres off)
       if (!isNew(platform)) {
         const rivals = (stops.rivals.get(dataId) || []).flatMap((r) => (stops.platforms.get(r) || [])
           .filter((c) => c.id !== platform).map((c) => c.pos));
-        spot = locateStop(obj, ways, pos, { start, rivals, vehicle: this.vehicle, platform: true }) || spot;
+        spot = locateStop(obj, ways, pos, { start, rivals, vehicle: this.vehicle, platform: true, terminus }) || spot;
       } else if (dataId !== stopId) {
-        spot = this.locate(ways, dataId, start) || spot;
+        spot = this.locate(ways, dataId, start, terminus) || spot;
       }
       if (spot) {
         start = spot.wayIndex;
@@ -108,16 +135,30 @@ class LineBuilder {
         if (this.mode === "coach") obj.edit(stopPosition).tags.coach = "yes"; // required with route=coach by PTNA
         completeRouteRef(obj, stopPosition, this.route.route_short_name);
         members.push([stopPosition, "stop"]);
+        if (i === 0) first = [spot.wayIndex, stopPosition];
+        if (i === v.seq.length - 1) last = [spot.wayIndex, stopPosition];
         if (kerb === false) this.wrongSide.push(name);
       } else this.missing++;
       completeRouteRef(obj, platform, this.route.route_short_name);
       members.push([platform, "platform"]);
     }
+    ways = this.betweenTermini(ways, first, last);
     for (let i = 1; i < ways.length; i++) {
       const next = new Set(obj.get(ways[i]).nodes);
       if (!obj.get(ways[i - 1]).nodes.some((n) => next.has(n))) this.gaps.add(`${ways[i - 1]}/${ways[i]}`);
     }
     return [...members, ...ways.map((w) => [w, ""])];
+  }
+
+  /** The ways from the first stop_position to the last one, [way index, node] (null: unknown, that end is left as it is). What comes before or after is not
+   * travelled. A stop_position at the junction of two ways belongs to the one the line goes on with: the way ending there is left out. Ways still partly
+   * travelled are cut at these stop_positions (splitting). */
+  betweenTermini(ways, first, last) {
+    const { obj } = this;
+    let lo = first ? first[0] : 0, hi = last ? last[0] : ways.length - 1;
+    while (first && lo < hi && linkNode(obj, ways[lo], ways[lo + 1]) === first[1]) lo++;
+    while (last && lo < hi && linkNode(obj, ways[hi - 1], ways[hi]) === last[1]) hi--;
+    return ways.slice(lo, hi + 1);
   }
 
   build(variants) {
@@ -149,7 +190,7 @@ class LineBuilder {
     const routeKeys = drafts.map(([members, tags], i) => {
       if (paired.has(i)) {
         const key = paired.get(i);
-        obj.set(key, updatedRelation(existing.routes[key], members, tags));
+        obj.set(key, { ...updatedRelation(existing.routes[key], members, tags), ...(variants[i].complete ? { complete: true } : {}) });
         this.updated.push(key);
         return key;
       }
@@ -159,6 +200,7 @@ class LineBuilder {
     });
     const used = new Set(paired.values());
     this.unpaired = candidates.filter((k) => !used.has(k));
+    for (const k of this.unpaired) if (existing.routes[k].correctedIds) obj.set(k, existing.routes[k]);
     if (existing) this.elsewhere = existing.otherNetworks(mode, ref, network.network, drafts);
 
     const masterTags = { type: "route_master", route_master: mode, ...(ref ? { ref } : {}), name: routeName(mode, ref, masterLabel(endpoints)), ...common };

@@ -17,9 +17,9 @@ import { ExistingRoutes, WIKI_KEYS } from "./existing.js";
 import { bbox, inBbox, latlon } from "./geo.js";
 import { lineVariants, refSortKey, stopSequences } from "./gtfs.js";
 import { matchVariant } from "./matching.js";
-import { keepTraces } from "./reuse.js";
+import { keepTraces, terminusRoads } from "./reuse.js";
 import { lookup } from "./lookup.js";
-import { accentsFrom, agencyNetworks, cleanStopName, fixAccents, nameKey, routeLabel, slug, townedName, words } from "./naming.js";
+import { accentsFrom, agencyNetworks, cleanStopName, fixAccents, nameKey, routeLabel, slug, stopNames, words } from "./naming.js";
 import { services, valhallaReady } from "./net.js";
 import { Store, completeWayNodes, platformsIn, readWays, routesIn, writeOsm } from "./osm.js";
 import { filterRoadPlatforms, nameNumberedNetworkTags, networkKeyFor, tagPlatforms } from "./platforms.js";
@@ -122,8 +122,8 @@ async function mapLines(feed, routes, trips, stops, networks, existing, onProgre
     for (const v of found) {
       onProgress(`Map-matching: line ${label}, variant ${++done}/${total}`);
       if (kept.has(v)) {
-        const [kept_from, ways] = kept.get(v);
-        variants.push({ ...v, ways, source: "existing", kept_from });
+        const [kept_from, ways, complete] = kept.get(v);
+        variants.push({ ...v, ways, source: "existing", kept_from, complete });
         continue;
       }
       try {
@@ -249,25 +249,24 @@ async function prepareStops(feed, { allStops }, box, osmStops, detected) {
   return stops;
 }
 
-/** Final names of the stops, and the labels of the route names of the lines (see settings.stop_names and naming.routeLabel). */
+/** Final names of the stops (naming.stopNames), and the labels of the route names of the lines (naming.routeLabel). */
 async function nameStops(stops, used, trips, lang, onProgress) {
   if (settings.fix_accents) {
     onProgress("Spelling of the stop names…");
     await restoreAccents(stops, used, lang);
   }
   const placesOf = (s) => lookup.placesAt(s.lat, s.lon, lang);
-  if (settings.stop_names === "town") {
-    onProgress("Towns of the stops (Nominatim)…"); // with the opposite stops: the data of one may replace the other (platforms.fixSide)
-    for (const id of new Set(used.flatMap((u) => [u, ...(stops.neighbours.get(u) || [])]))) {
-      const s = stops.df.get(id);
-      s.stop_name = townedName(await placesOf(s), s.stop_name);
-    }
+  onProgress("Towns of the stops (Nominatim)…"); // with the opposite stops: the data of one may replace the other (platforms.fixSide)
+  for (const id of new Set(used.flatMap((u) => [u, ...(stops.neighbours.get(u) || [])]))) {
+    const s = stops.df.get(id);
+    const { name, official_name } = await stopNames(await placesOf(s), s.stop_name, (place) => lookup.placeNear(place, s.lat, s.lon));
+    s.stop_name = name;
+    s.official_name = official_name;
   }
   for (const s of stops.df.values()) s.label = s.stop_name;
-  onProgress("Towns of the termini (Nominatim)…");
   for (const id of new Set(trips.flatMap((t) => [t.stop_seq[0], t.stop_seq.at(-1)]))) {
     const s = stops.df.get(id);
-    s.label = routeLabel(await placesOf(s), s.stop_name);
+    s.label = routeLabel(await placesOf(s), s.official_name ?? s.stop_name); // the town the name gave, which may not be the one of the position
   }
 }
 
@@ -279,6 +278,7 @@ async function readRoads(variants, stops, osmStops, known) {
     v.ways = dedupe(v.ways.filter((w) => roads[w]?.nodes)); // ways deleted from OSM since the Valhalla tiles were built
     if (v.ways.length < before) log.warn(`  trip ${v.trip_id}: ${before - v.ways.length} way(s) from Valhalla missing from OSM (older Valhalla data)`);
   }
+  Object.assign(roads, { ...(await terminusRoads(variants, stops, roads)), ...roads });
   // a node of a travelled way (legacy highway=bus_stop on the carriageway) is a stop_position, not a platform
   const osm = { ...osmStops, ...roads };
   const roadNodes = new Set(variants.flatMap((v) => v.ways.flatMap((w) => roads[w].nodes)));
@@ -355,6 +355,6 @@ export async function runRoutes(feed, { network = null, ref = null, onProgress =
   await completeWayNodes(obj);
   const review = reviewRefs(obj, { ...owners, stops: await feed.stops(), feed: activeFeed() });
 
-  const summary = { lines: lines.length, variants: variants.length, stops: used.length, "kept traces": variants.filter((v) => v.kept_from).length };
+  const summary = { lines: lines.length, variants: variants.length, stops: used.length, "kept traces": variants.filter((v) => v.kept_from).length, "complete relations": variants.filter((v) => v.complete).length };
   return { xml: writeOsm(obj), review, filename: outputName(network, routes), detected, summary, state: { routes, trips, stops, lines, obj, networks, assignments } };
 }
