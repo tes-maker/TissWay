@@ -29,7 +29,7 @@
   </div>
 
   <section class="box" aria-label="Converter">
-    <div id="source">
+    <div id="source" data-lock>
       <label id="drop" class="drop">
         <input id="file-input" type="file" accept=".zip,.osm,.xml,application/zip">
         <svg viewBox="0 0 24 24" width="44" height="44" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
@@ -45,7 +45,7 @@
       </div>
     </div>
 
-    <div id="chip" class="chip" hidden>
+    <div id="chip" class="chip" data-lock hidden>
       <span class="chip-mark" aria-hidden="true">✓</span>
       <span class="chip-text"><b id="chip-name"></b><small id="chip-info"></small></span>
       <button id="chip-change" class="link">Change</button>
@@ -57,7 +57,7 @@
       <button id="cancel-load" class="link danger">Cancel</button>
     </div>
 
-    <div id="options" class="options" hidden>
+    <div id="options" class="options" data-lock hidden>
       <label>Network
         <select id="network"></select>
       </label>
@@ -100,7 +100,7 @@
       </div>
     </div>
 
-    <div id="via" class="panel" hidden>
+    <div id="via" class="panel" data-lock hidden>
       <label>Only names starting with (optional)
         <input id="via-prefix" placeholder="Bus 117:">
       </label>
@@ -205,20 +205,24 @@
       <h1>Settings</h1>
       <p class="hint">Nothing to change to get started. Your changes stay in this browser.</p>
     </div>
-    <div class="group wrap">
+    <div class="group wrap" data-lock>
       <label class="file-button">Import<input id="settings-import" type="file" accept=".json,application/json"></label>
       <button id="settings-export">Export</button>
       <button id="cache-clear">Clear cached data</button>
       <button id="settings-reset" class="danger">Reset all</button>
     </div>
   </div>
+  <div id="settings-locked" class="locked-note" role="status" hidden>
+    <span>A run is in progress: nothing can be changed until it ends or is cancelled.</span>
+    <button id="settings-cancel" type="button" class="small danger">Cancel the run</button>
+  </div>
   <label class="search">Find a setting
     <input id="settings-search" type="search" autocomplete="off" placeholder="platform, Valhalla, accents…">
   </label>
   <p id="settings-status" class="status" role="status"></p>
-  <div id="settings-form" class="stack"></div>
+  <div id="settings-form" class="stack" data-lock></div>
 
-  <details class="more fix-zone">
+  <details class="more fix-zone" data-lock>
     <summary>Correct a whole network</summary>
     <p class="hint">Puts the stops and relations already mapped in OSM in the form of this site, without changing a trace. You get a file to review.</p>
     <p id="fix-no-feed" class="hint">Load a feed on the Converter page first: it gives the networks and their area.</p>

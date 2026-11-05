@@ -58,6 +58,12 @@ function refresh() {
   $("via").hidden = !state.viaFile;
   $("action").hidden = !ready || busy;
   $("working").hidden = !busy || state.loading;
+  // during a run, only Cancel acts on it: what it reads must not change under it
+  for (const part of document.querySelectorAll("[data-lock]")) {
+    part.inert = busy;
+    part.classList.toggle("locked", busy);
+  }
+  $("settings-locked").hidden = !busy;
   refreshFix();
   refreshConvert();
 }
@@ -70,6 +76,7 @@ async function task(fn) {
   services.signal = state.controller.signal;
   showError("");
   refresh();
+  $("working").scrollIntoView({ block: "nearest" }); // Cancel, the only control left, stays in sight below a long list of lines
   const started = Date.now();
   try {
     await fn();
@@ -558,6 +565,7 @@ function wire() {
   $("convert").addEventListener("click", convert);
   $("cancel").addEventListener("click", () => state.controller?.abort());
   $("cancel-load").addEventListener("click", () => state.controller?.abort());
+  $("settings-cancel").addEventListener("click", () => state.controller?.abort());
   $("again").addEventListener("click", () => {
     reset();
     scrollTo(0, 0);

@@ -261,6 +261,9 @@ textarea.secret.shown { -webkit-text-security: none; }
 /* Ref priorities, before the download */
 .ref-dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); border: 1px solid var(--line); border-radius: 14px; padding: 20px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
 .ref-dialog[open] { display: grid; gap: 14px; }
+.locked { opacity: .5; filter: grayscale(1); transition: opacity .15s; }
+.locked-note { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; background: var(--warn-soft); color: var(--warn); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: .92rem; }
+.locked-note[hidden] { display: none; }
 .fix-zone { margin-top: 18px; color: var(--muted); }
 .fix-zone summary { font-weight: 400; font-size: .85rem; }
 .fix-row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; }
