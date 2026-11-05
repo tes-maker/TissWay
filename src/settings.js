@@ -33,6 +33,9 @@ export const SCHEMA = [
     { key: "colour_text", label: "Text colour (colour:text)", type: "colour", value: "", help: "#RRGGBB, on every line generated. Empty: route_text_color of the GTFS." },
     { key: "driving_side", label: "Driving side", type: "select", options: [AUTO, "right", "left"], value: AUTO, help: 'Platforms are on the kerb side. "auto": from the country of the stops (Nominatim, Wikidata).' },
   ] },
+  { group: "Operator", intro: "Never taken from the GTFS: its agency is often not the real operator. Stop_positions stay without one, it goes on their platform.", items: [
+    { key: "operators", label: "Operator of each network", type: "json", value: {}, help: 'Network -> operator: {"Twisto": "RATP Dev Caen la mer", "Nomad": "Keolis"}. Set on the route and route_master relations generated, on the platforms of the file for each network they carry, and in the PTNA list. It replaces the one of that network already mapped. On a shared stop, the operators follow the ref priorities: the first network holding ref comes first (operator=A;B, in the order of network=A;B), and an operator already there stays with the network that owned the stop. Empty: operators already mapped are left as they are.' },
+  ] },
   { group: "Names", items: [
     { key: "fix_accents", label: "Restore dropped accents", type: "boolean", value: true, help: "From the spelling of nearby OSM platforms, else from Wiktionary in the language of the feed. Every change is listed in the log." },
   ] },

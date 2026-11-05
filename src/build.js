@@ -2,7 +2,7 @@
 
 import { feedKey, joinIds, updatedMaster, updatedRelation } from "./existing.js";
 import { latlon, xy } from "./geo.js";
-import { masterLabel, modePrefix, routeName, tripTitle } from "./naming.js";
+import { masterLabel, modePrefix, operatorOf, routeName, tripTitle } from "./naming.js";
 import { isNew, newKey } from "./osm.js";
 import { linkNode } from "./splitting.js";
 import { VEHICLE, choosePlatform, completeRouteRef, fixSide, kerbSide, locateStop, makeSpot, materialize, onKerb, roadDistance, sideSegment, stopSegment } from "./platforms.js";
@@ -15,6 +15,8 @@ const HEX_COLOUR = /^#?([0-9A-Fa-f]{6})$/;
 /** Tags shared by the route relations and the route_master of a line. */
 function routeTags(route, network) {
   const tags = { ...network };
+  const operator = operatorOf(network.network);
+  if (operator) tags.operator = operator;
   for (const [gtfsKey, setting, osmKey] of [["route_color", "colour", "colour"], ["route_text_color", "colour_text", "colour:text"]]) {
     const m = HEX_COLOUR.exec((settings[setting] || route[gtfsKey] || "").trim());
     if (m) tags[osmKey] = `#${m[1]}`;
@@ -188,6 +190,7 @@ class LineBuilder {
     const routeKeys = drafts.map(([members, tags], i) => {
       if (paired.has(i)) {
         const key = paired.get(i);
+        this.noteOperator(key, existing.routes[key], common.operator);
         obj.set(key, { ...updatedRelation(existing.routes[key], members, tags), ...(variants[i].complete ? { complete: true } : {}) });
         this.updated.push(key);
         return key;
@@ -205,6 +208,7 @@ class LineBuilder {
     const master = existing && existing.master(mode, ref, network.network, route.route_id, this.updated);
     if (master) {
       masterTags[feedKey("gtfs:route_id")] = existing.masterRouteIds(existing.masters[master], route.route_id);
+      this.noteOperator(master, existing.masters[master], common.operator);
       obj.set(master, updatedMaster(existing.masters[master], routeKeys, masterTags));
       this.updated.push(master);
       this.shareOperator([master, ...routeKeys]);
@@ -238,8 +242,13 @@ class LineBuilder {
     this.sameNames = [...counter(drafts.map(([, tags]) => tags.name))].filter(([, n]) => n > 1).map(([name]) => name);
   }
 
+  /** The operator of the settings replaces the one of a mapped relation: reported. */
+  noteOperator(key, old, operator) {
+    if (operator && old.tags.operator && old.tags.operator !== operator) log.warn(`  ${key}: operator ${old.tags.operator} replaced by ${operator} (Settings)`);
+  }
+
   /** PTNA reports a route without the operator of its route_master, and the reverse. The operator is never taken from the GTFS (its
-   * agency is often not the real operator): only an operator the mapped relations of the line agree on is shared with the others. */
+   * agency is often not the real operator): without one in the settings, only an operator the mapped relations of the line agree on is shared with the others. */
   shareOperator(keys) {
     const values = new Set(keys.map((k) => this.obj.get(k)?.tags.operator).filter(Boolean));
     if (values.size !== 1) return;

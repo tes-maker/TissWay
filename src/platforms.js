@@ -508,7 +508,7 @@ function addTag(t, key, value) {
 
 const splitValues = (value) => (value ?? "").split(";").map((v) => v.trim()).filter(Boolean);
 const NUMBERED_REF = /^((?:local_)?ref(?::.*?)?)((?::\d+)+)$/;
-export const NETWORK_KEYS = ["network", "network:wikidata", "network:wikipedia"];
+export const NETWORK_KEYS = ["network", "network:wikidata", "network:wikipedia", "operator"]; // what follows the network owning the stop
 const isRefKey = (key) => /^(?:ref|local_ref)$/.test(key) || settings.stop_ref_tags.includes(key);
 
 /** Key of a ref for a network that does not own the stop: "ref:Nomad", "ref:FR:Atoumod:Nomad". */
@@ -524,6 +524,7 @@ function splitNetworkLists(t) {
   t.network = names[0];
   for (const name of names.slice(1)) t[`network:${++number}`] = name;
   for (const key of NETWORK_KEYS.slice(1)) {
+    if (key === "operator" && t.type) continue; // a relation has no form for it: only a platform puts operator:<network> back together in a file
     const values = splitValues(t[key]);
     if (values.length !== names.length) continue;
     t[key] = values[0];
@@ -550,7 +551,7 @@ export function nameNumberedNetworkTags(t) {
   const numbered = Object.keys(t).filter((k) => /^network:\d+$/.test(k)).sort((a, b) => Number(a.slice(8)) - Number(b.slice(8)));
   const names = new Map(numbered.map((k) => [k.slice("network:".length), t[k]]));
   for (const key of Object.keys(t)) {
-    const wiki = /^(network:wikidata|network:wikipedia):(\d+)$/.exec(key);
+    const wiki = /^(network:wikidata|network:wikipedia|operator):(\d+)$/.exec(key);
     const code = /^(gtfs:stop_code(?::[A-Z][A-Z][a-zA-Z0-9_.-]+)?):(\d+)$/.exec(key);
     const match = wiki || code;
     if (!match) continue;

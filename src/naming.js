@@ -13,6 +13,15 @@ export const slug = (s) => unaccent(s).toLowerCase().replace(/[^a-z0-9]+/g, "-")
 /** Comparison key of a stop name: case, accents and punctuation ignored. */
 export const nameKey = (name) => unaccent(name || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
+/** Operator set for this network in settings.operators, "" if none. The feed and OSM may name a network differently ("Nomad Car", "Nomad"): a name starting the other one counts, when it is the only one to. */
+export function operatorOf(network) {
+  const wanted = nameKey(network);
+  const entries = Object.entries(settings.operators).filter(([, operator]) => typeof operator === "string" && operator.trim());
+  const exact = entries.find(([name]) => nameKey(name) === wanted);
+  const close = entries.filter(([name]) => nameKey(name).startsWith(`${wanted} `) || wanted.startsWith(`${nameKey(name)} `));
+  return (exact ?? (close.length === 1 ? close[0] : null))?.[1].trim() ?? "";
+}
+
 // --- accents ---------------------------------------------------------------------------------------------
 
 const isUpper = (s) => s === s.toUpperCase() && s !== s.toLowerCase();
