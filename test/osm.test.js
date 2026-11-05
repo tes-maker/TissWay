@@ -99,7 +99,7 @@ test("Mont Coco: the id of the stop holding ref, whichever networks were run, th
     "gtfs:stop_id": NOMAD, highway: "bus_stop", name: "Mont Coco", network: "Twisto;Nomad Car", "network:wikidata": "Q3537947;Q98131290",
     "network:wikipedia": "fr:Transports en commun de Caen;fr:Nomad (réseau)", operator: "RATP Dev Caen la mer", public_transport: "platform", ref: "chuo02",
     "ref:FR:Atoumod": TWISTO, "ref:FR:Atoumod:Nomad": NOMAD, "ref:Nomad": "14CAE74A", shelter: "no", tactile_paving: "no", wheelchair: "no" };
-  const { "gtfs:stop_code:FR-NOR-Atoumod:Nomad": code, ...expected } = { ...COCO, "gtfs:stop_id": TWISTO };
+  const { "gtfs:stop_code:FR-NOR-Atoumod:Nomad": code, alt_name: altName, ...expected } = { ...COCO, "gtfs:stop_id": TWISTO };
   const ofStop = new Map([[TWISTO, new Set(["Twisto"])], [NOMAD, new Set(["Nomad Car"])]]);
   const stops = [{ stop_id: TWISTO, stop_code: "chuo02", stop_lat: "49", stop_lon: "1" }, { stop_id: NOMAD, stop_code: "14CAE74A", stop_lat: "49", stop_lon: "1" }];
   const run = (network, id, ref) => ({ name: "Mont Coco", network, [`gtfs:stop_id:${FEED}`]: id, [`gtfs:stop_code:${FEED}`]: ref, "ref:FR:Atoumod": id, ref });
@@ -113,7 +113,8 @@ test("Mont Coco: the id of the stop holding ref, whichever networks were run, th
     reviewRefs(obj, { ofStop, stops, feed: FEED });
     return Object.fromEntries(parseXml(writeOsm(obj)).children[0].children.map((tag) => [tag.attrs.k, tag.attrs.v]));
   };
-  for (const runs of [[], [twisto], [nomad], [twisto, nomad], [nomad, twisto]]) assert.deepEqual(exported(runs), expected);
+  assert.deepEqual(exported([]), { ...expected, alt_name: altName }); // only the stops of a line lose their alt_name
+  for (const runs of [[twisto], [nomad], [twisto, nomad], [nomad, twisto]]) assert.deepEqual(exported(runs), expected);
   assert.deepEqual(exported([twisto]), exported([twisto, nomad]));
   [settings.feed, settings.stop_ref_tags, settings.stop_owners] = saved;
 });

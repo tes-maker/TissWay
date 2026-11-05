@@ -71,6 +71,16 @@ test("the stops of the network: name, official_name, no bus=yes on platforms, id
   assert.equal(out.get("n3").tags["gtfs:stop_id"], "NOMAD:B");
 });
 
+test("no alt_name on the stops, even a stop already right otherwise, and none goes from a stop_position to its platform", async () => {
+  line();
+  answer.objects[1].tags.alt_name = "Corday";
+  answer.objects[2].tags = { ...answer.objects[2].tags, name: "Gare", official_name: "LISIEUX - Gare", alt_name: "Gare de Lisieux" };
+  answer.objects[3].tags.alt_name = "Gare SNCF";
+  const out = read((await run()).xml);
+  for (const key of ["n1", "n2", "n3", "n4"]) assert.ok(out.has(key) && !("alt_name" in out.get(key).tags), key);
+  assert.ok(!("alt_name" in answer.relations[0].tags));
+});
+
 test("a stop_position gets the short name, keeps bus=yes, has no official_name", async () => {
   line();
   const out = read((await run()).xml);

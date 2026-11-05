@@ -340,6 +340,15 @@ test("platform tags: no bus=yes, GTFS keys with the feed code", () => {
   assert.deepEqual([t["gtfs:stop_id:FR-X"], t["gtfs:stop_name:FR-X"], t["gtfs:stop_code:FR-X"], t["gtfs:stop_id"]], ["S1", undefined, "12A", undefined]);
 });
 
+test("alt_name leaves the stops of a line: platform and stop_position, without passing from one to the other", () => {
+  const obj = new Store({ n1: { version: "1", lat: 49, lon: 1, tags: { public_transport: "platform", name: "Gare", alt_name: "Gare SNCF" } } });
+  enrich(obj, "n1", { name: "Gare", network: "Twisto" });
+  assert.ok(!("alt_name" in obj.get("n1").tags));
+  const { tags, moved } = stopPositionOnly({ public_transport: "stop_position", bus: "yes", name: "Gare", alt_name: "Gare SNCF", shelter: "yes" }, "Gare");
+  assert.ok(!("alt_name" in tags) && !("alt_name" in moved));
+  assert.deepEqual(moved, { shelter: "yes" });
+});
+
 test("enrich removes a GTFS stop name only when it duplicates name", () => {
   settings.feed = "FR-X";
   const obj = new Store({
