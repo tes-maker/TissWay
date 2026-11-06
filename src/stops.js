@@ -10,8 +10,9 @@
 
 import { Grid, latlon, osmPosition } from "./geo.js";
 import { stopKey } from "./naming.js";
+import { CODE_IN_ID } from "./platforms.js";
 import { settings } from "./settings.js";
-import { setIn } from "./util.js";
+import { setIn, splitTag } from "./util.js";
 
 /** Code shared by the platforms of one stop: the stop_code without its trailing letter ("2702282A" -> "2702282"),
  * null if the code does not have that form. */
@@ -22,15 +23,16 @@ export function siblingCode(code) {
 
 /** GTFS stops (df: stop_id -> row) and their neighbours, see matchStops. */
 export class Stops {
-  constructor(df, platforms, neighbours, holders, rivals = new Map()) {
+  constructor(df, platforms, neighbours, holders, rivals = new Map(), refHolders = new Map()) {
     this.df = df;
-    // stop_id -> candidate OSM platforms [{id, pos, name, holder, far}]: within thresholds.platform_m, or holder_m if
-    // they already carry this stop_id (holder), or platform_far_m / platform_same_name_m (same name) with far = true,
-    // to be checked against the road (platforms.verified), when no stop of another name is clearly closer to them
+    // stop_id -> candidate OSM platforms [{id, pos, name, holder, byRef, far}]: within thresholds.platform_m, or holder_m if
+    // they already carry this stop_id (holder), or ref_m if they have its code as a ref (byRef), or platform_far_m / platform_same_name_m (same name).
+    // far = true: to be checked against the road (platforms.verified). Without its id or ref, a far one only when no stop of another name is clearly closer to it
     this.platforms = platforms;
     this.neighbours = neighbours; // stop_id -> other GTFS platforms of the same stop (opposite stop)
     this.holders = holders; // stop_id -> Set of OSM platforms already carrying it (gtfs:stop_id*, stop_ref_tags)
     this.rivals = rivals; // stop_id -> neighbours + same-name stops nearby
+    this.refHolders = refHolders; // stop_id -> Set of OSM platforms within ref_m with its code as a ref
   }
 
   /** Positions of the stops a stop_position of this stop is compared with: the OSM platforms of its rivals, other than the one it uses, else their GTFS position. */
@@ -62,6 +64,12 @@ function holdersOf(osm) {
   return holders;
 }
 
+/** The values of the refs of a platform. */
+const refsOf = (tags) => new Set(Object.entries(tags).filter(([k]) => /^(?:ref|gtfs:stop_code)(?::|$)/.test(k)).flatMap(([, v]) => splitTag(v)));
+
+/** What a ref of this stop can be: its stop_id, and its codes unless those of the GTFS are not trusted (settings.stop_refs_from_gtfs). */
+const refValuesOf = (stop) => [stop.stop_id, ...(settings.stop_refs_from_gtfs ? [stop.stop_code, CODE_IN_ID.exec(stop.stop_id)?.[1]] : [])].filter(Boolean);
+
 /** OSM stops usable as platforms: nodes and ways, a stop_position (even tagged highway=bus_stop) never is. */
 export const osmPlatforms = (osm) => Object.entries(osm)
   .filter(([key, o]) => (key[0] === "n" || key[0] === "w") && o.tags.public_transport !== "stop_position" && osmPosition(o))
@@ -74,9 +82,10 @@ export function matchStops(stopRows, agencies, osm) {
   const holders = holdersOf(osm);
   const df = new Map(stopRows.map((s) => [s.stop_id, s]));
   const keys = new Map(stopRows.map((s) => [s.stop_id, stopKey(s.stop_name)]));
-  const reach = Math.max(th.holder_m, th.platform_far_m, th.platform_same_name_m);
+  const reach = Math.max(th.holder_m, th.ref_m, th.platform_far_m, th.platform_same_name_m);
   const grid = new Grid(stopRows, latlon, Math.max(reach, th.sibling_m));
   const platforms = new Map(stopRows.map((s) => [s.stop_id, []]));
+  const refHolders = new Map();
 
   for (const p of osmPlatforms(osm)) {
     const near = grid.within(p.pos, reach);
@@ -88,6 +97,7 @@ export function matchStops(stopRows, agencies, osm) {
     }
     const ranked = [...byName].sort((a, b) => a[1] - b[1]);
     const osmKey = p.name === null ? null : stopKey(p.name);
+    const refs = refsOf(osm[p.id].tags);
     for (const [s, d] of near) {
       const key = keys.get(s.stop_id);
       const other = (ranked[0][0] !== key ? ranked[0][1] : ranked[1]?.[1]) ?? Infinity;
@@ -95,8 +105,10 @@ export function matchStops(stopRows, agencies, osm) {
       // beyond platform_m, the platform of another stop is likely: only if no stop of another name is clearly
       // closer to it (stops of the same name are left to the side check of platforms.verified)
       const alone = d <= other + th.duplicate_stop_m;
-      if (holder || d <= th.platform_m || (alone && d <= (key === osmKey ? th.platform_same_name_m : th.platform_far_m))) {
-        platforms.get(s.stop_id).push({ id: p.id, pos: p.pos, name: p.name, holder, far: !holder && d > th.platform_m });
+      const byRef = d <= th.ref_m && refValuesOf(s).some((v) => refs.has(v));
+      if (byRef) setIn(refHolders, s.stop_id).add(p.id);
+      if (holder || byRef || d <= th.platform_m || (alone && d <= (key === osmKey ? th.platform_same_name_m : th.platform_far_m))) {
+        platforms.get(s.stop_id).push({ id: p.id, pos: p.pos, name: p.name, holder, byRef, far: !holder && d > th.platform_m });
       }
     }
   }
@@ -121,5 +133,5 @@ export function matchStops(stopRows, agencies, osm) {
       if (sibling || (key && key === keys.get(b.stop_id))) rivals.get(a.stop_id).push(b.stop_id);
     }
   }
-  return new Stops(df, platforms, neighbours, holders, rivals);
+  return new Stops(df, platforms, neighbours, holders, rivals, refHolders);
 }
