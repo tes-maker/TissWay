@@ -12,9 +12,9 @@ import { Store, completeWayNodes, platformsIn, writeOsm } from "./osm.js";
 import { stopNetworks } from "./pipeline.js";
 import { reviewRefs } from "./ref_review.js";
 import { settings } from "./settings.js";
-import { addStopValue, nameNumberedNetworkTags, nameNumberedRefs, networkKeyFor } from "./platforms.js";
+import { addStopValue, nameNumberedNetworkTags, nameNumberedRefs, refKeyFor } from "./platforms.js";
 import { osmPlatforms } from "./stops.js";
-import { log, sameTags, sortedBy } from "./util.js";
+import { log, sameTags, setIn, setList, sortedBy, splitTag, unique } from "./util.js";
 
 const WHEELCHAIR = { 1: "yes", 2: "no" };
 
@@ -22,13 +22,13 @@ const WHEELCHAIR = { 1: "yes", 2: "no" };
 export async function networkStops(feed, network) {
   const networks = agencyNetworks(await feed.agency());
   const agencies = new Set(Object.entries(networks).filter(([, t]) => t.network.toLowerCase() === network.toLowerCase()).map(([a]) => a));
-  if (!agencies.size) throw new Error(`Unknown network "${network}". Available: ${[...new Set(Object.values(networks).map((t) => t.network))].sort().join(", ")}`);
+  if (!agencies.size) throw new Error(`Unknown network "${network}". Available: ${unique(Object.values(networks).map((t) => t.network)).sort().join(", ")}`);
   const refOf = new Map((await feed.routes()).filter((r) => agencies.has(r.agency_id) && settings.modes.includes(r.mode)).map((r) => [r.route_id, r.route_short_name]));
   const tripRef = new Map((await feed.trips()).filter((t) => refOf.has(t.route_id)).map((t) => [t.trip_id, refOf.get(t.route_id)]));
   const refs = new Map();
   for (const { trip_id, stop_id } of await feed.stopTimes(tripRef.keys())) {
-    if (!refs.has(stop_id)) refs.set(stop_id, new Set());
-    if (tripRef.get(trip_id)) refs.get(stop_id).add(tripRef.get(trip_id));
+    const lineRefs = setIn(refs, stop_id);
+    if (tripRef.get(trip_id)) lineRefs.add(tripRef.get(trip_id));
   }
   return (await feed.stops()).filter((s) => refs.has(s.stop_id)).map((s) => ({ ...s, route_ref: refs.get(s.stop_id) }));
 }
@@ -54,13 +54,11 @@ export function feedTags(tags, stop, feedId, network = tags.network) {
   nameNumberedNetworkTags(t);
   nameNumberedRefs(t, stop.stop_id);
   addStopValue(t, `gtfs:stop_id${suffix}`, stop.stop_id);
-  const stopNames = (t[`gtfs:stop_name${suffix}`] ?? "").split(";").map((v) => v.trim()).filter((v) => v && v !== t.name);
-  if (stopNames.length) t[`gtfs:stop_name${suffix}`] = stopNames.join(";");
-  else delete t[`gtfs:stop_name${suffix}`];
+  setList(t, `gtfs:stop_name${suffix}`, splitTag(t[`gtfs:stop_name${suffix}`]).filter((v) => v !== t.name));
   if (stop.stop_name !== t.name) addStopValue(t, `gtfs:stop_name${suffix}`, stop.stop_name);
   if (stop.stop_code && settings.stop_refs_from_gtfs) {
     const key = `gtfs:stop_code${suffix}`;
-    addStopValue(t, t.network && network !== t.network ? networkKeyFor(key, network) : key, stop.stop_code);
+    addStopValue(t, t.network && network !== t.network ? refKeyFor(key, network) : key, stop.stop_code);
   }
   const refs = new Set([...(t.route_ref || "").split(";").filter(Boolean), ...stop.route_ref]);
   if (refs.size) t.route_ref = sortedBy(refs, refSortKey).join(";");
@@ -95,5 +93,5 @@ export async function runPlatforms(feed, { network, feedId = null, max_m = 30, o
   log.info(`${stops.length} GTFS stops: ${matches.size} paired with an OSM platform (<= ${max_m} m), ${obj.modified.size} platform(s) modified`);
   log.info(`${missing.length} stop(s) without a nearby OSM platform`);
   const base = `${slug(network)}_platforms`;
-  return { xml: writeOsm(obj), review, filename: `${base}.osm`, csv, csvName: `${base}_unmatched.csv`, detected: suffix ? [["Suffix of the gtfs:* tags", suffix]] : [], summary: { stops: stops.length, paired: matches.size, missing: missing.length } };
+  return { get xml() { return writeOsm(obj); }, review, filename: `${base}.osm`, csv, csvName: `${base}_unmatched.csv`, detected: suffix ? [["Suffix of the gtfs:* tags", suffix]] : [], summary: { stops: stops.length, paired: matches.size, missing: missing.length } };
 }

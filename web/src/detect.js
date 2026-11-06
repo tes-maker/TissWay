@@ -28,7 +28,7 @@ export async function feedCodeOf(feed, relations = {}) {
   if (feed.feedCode) return feed.feedCode;
   const ids = new Set((await feed.routes()).map((r) => r.route_id));
   let code = detectFeed(relations, ids);
-  if (!code) {
+  if (!code && feed.feedCode === undefined) {
     const stops = await feed.stops();
     const trimmed = (values) => {
       const sorted = [...values].sort((a, b) => a - b), cut = Math.floor(sorted.length / 20);
@@ -40,6 +40,7 @@ export async function feedCodeOf(feed, relations = {}) {
     } catch (err) {
       if (err.name === "AbortError") throw err;
       log.warn(`OSM relations of the feed not available (${err.message})`);
+      return ""; // not known: asked again next time
     }
   }
   feed.feedCode = code;

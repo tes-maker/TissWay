@@ -20,6 +20,12 @@ const OPTIONAL_COLUMNS = {
 };
 const TRIP_COLUMNS = ["route_id", "trip_id", "direction_id", "shape_id"];
 
+/** Can this line be a row whose first field is in values? Without parsing it: with quotes, or a single field, it may be. */
+function wantedLine(line, values) {
+  const end = line.indexOf(",");
+  return end < 0 || line.includes('"') || values.has(line.slice(0, end).trimStart());
+}
+
 /** Fields of a CSV line. Quotes are handled, spaces after a separator ignored. */
 export function splitCsvLine(line, sep = ",") {
   if (!line.includes('"')) return line.split(sep).map((v) => v.trimStart());
@@ -106,14 +112,14 @@ export class Feed {
     return this.files.has(`${name}.txt`);
   }
 
-  /** Parsed rows of a table: onHeader(names) once, then onFields(values) for each row. */
-  async eachRow(name, onHeader, onFields) {
+  /** Parsed rows of a table: onHeader(names) once, then onFields(values) for each row. skip(line): true for a row not worth parsing. */
+  async eachRow(name, onHeader, onFields, skip = null) {
     const entry = this.files.get(`${name}.txt`);
     if (!entry) throw new GTFSError(`${name}.txt is missing from the GTFS archive`);
     const stream = (await entryStream(this.blob, entry)).pipeThrough(new TextDecoderStream()); // drops the BOM
     let started = false;
     await eachLine(stream, (line) => {
-      if (!line) return;
+      if (!line || (started && skip?.(line))) return;
       const fields = splitCsvLine(line);
       if (started) return onFields(fields);
       started = true;
@@ -121,11 +127,17 @@ export class Feed {
     });
   }
 
-  /** Stream a table: onRow(values) for each row, values in the order of columns ("" if missing). */
-  async scan(name, columns, onRow) {
-    let indices;
-    await this.eachRow(name, (header) => { indices = columns.map((c) => header.indexOf(c)); },
-      (fields) => onRow(indices.map((i) => (i < 0 ? "" : fields[i] ?? ""))));
+  /** Stream a table: onRow(values) for each row, values in the order of columns ("" if missing). only: the values of columns[0] wanted, if some
+   * rows can be left out; in a file of millions of rows, most are then not even parsed. */
+  async scan(name, columns, onRow, only = null) {
+    let indices, firstColumn = false;
+    await this.eachRow(name, (header) => {
+      indices = columns.map((c) => header.indexOf(c));
+      firstColumn = indices[0] === 0;
+    }, (fields) => {
+      const row = indices.map((i) => (i < 0 ? "" : fields[i] ?? ""));
+      if (!only || only.has(row[0])) onRow(row);
+    }, only && ((line) => firstColumn && !wantedLine(line, only)));
   }
 
   /** Whole table as objects, restricted to columns if given; missing optional columns added empty. */
@@ -217,7 +229,7 @@ export class Feed {
         }
       }
       if (wanted.has(trip_id)) out.push({ trip_id, stop_id, stop_sequence: Number(sequence), arrival, departure });
-    });
+    }, agencies ? null : wanted);
     if (agencies) this.agenciesOfStops = agencies;
     return out;
   }
@@ -234,9 +246,8 @@ export class Feed {
     if (!wanted.size || !this.has("shapes")) return new Map();
     const columns = ["shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence"];
     await this.scan("shapes", columns, ([id, lat, lon, sequence]) => {
-      if (!wanted.has(id)) return;
       listIn(points, id).push([Number(sequence), Number(lat), Number(lon)]);
-    });
+    }, wanted);
     return new Map([...points].map(([id, pts]) => [id, pts.sort((a, b) => a[0] - b[0]).map((p) => [p[1], p[2]])]));
   }
 }
@@ -308,15 +319,17 @@ export function lineVariants(trips) {
   const out = [];
   for (const direction of [...directions.keys()].sort()) {
     const dirTrips = directions.get(direction);
-    const keys = counter(dirTrips.map((t) => t.stop_seq.join(SEP)));
-    const sequences = new Map(dirTrips.map((t) => [t.stop_seq.join(SEP), t.stop_seq]));
-    for (const [key] of mostCommon(keys)) {
+    const tripsOf = new Map();
+    for (const t of dirTrips) listIn(tripsOf, t.stop_seq.join(SEP)).push(t);
+    const sequences = new Map([...tripsOf].map(([key, list]) => [key, list.at(-1).stop_seq]));
+    for (const [key] of mostCommon(new Map([...tripsOf].map(([k, list]) => [k, list.length])))) {
       const seq = sequences.get(key);
       if (seq.length < 2 || [...sequences.values()].some((o) => isSubRoute(seq, o))) continue;
-      const seqTrips = dirTrips.filter((t) => t.stop_seq.join(SEP) === key);
-      const [shape_id] = sortedBy(counter(seqTrips.map((t) => t.shape_id)), ([id, n]) => [-n, id])[0];
+      const seqTrips = tripsOf.get(key);
+      const ranked = sortedBy(counter(seqTrips.map((t) => t.shape_id)), ([id, n]) => [-n, id]).map(([id]) => id);
+      const [shape_id] = ranked;
       const durations = seqTrips.map((t) => t.duration_s).filter(Boolean).sort((a, b) => a - b);
-      const shapes = sortedBy(counter(seqTrips.map((t) => t.shape_id)), ([id, n]) => [-n, id]).map(([id]) => id).filter(Boolean);
+      const shapes = ranked.filter(Boolean);
       const sampleOf = (id) => seqTrips.find((t) => t.shape_id === id).trip_id;
       out.push({ direction, seq, shape_id, trip_id: sampleOf(shape_id), trips: seqTrips.length,
         ...(shapes.length > 1 ? { shape_ids: shapes, trip_ids: shapes.map(sampleOf) } : {}),

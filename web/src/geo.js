@@ -62,8 +62,8 @@ export function distancesToPolyline(points, polyline) {
 }
 
 /** [[lat, lon]] of an encoded polyline (Valhalla uses precision 6). */
-export function decodePolyline(encoded, precision = 6) {
-  const coords = [], factor = 10 ** precision;
+export function decodePolyline(encoded) {
+  const coords = [], factor = 1e6;
   let index = 0, lat = 0, lon = 0;
   const next = () => {
     let shift = 0, result = 0, b;
@@ -126,3 +126,6 @@ export class Grid {
     return out;
   }
 }
+
+/** Position of an OSM object: the node, or the center of a way. null without coordinates. */
+export const osmPosition = (o) => o.center ?? (o.lat !== undefined ? [o.lat, o.lon] : null);

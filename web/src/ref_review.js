@@ -18,20 +18,17 @@
 //
 // The review keeps the ref tags detected by the run: changing a setting afterwards resets what a run detected.
 
-import { dist } from "./geo.js";
+import { dist, osmPosition } from "./geo.js";
 import { unaccent } from "./naming.js";
-import { CODE_IN_ID, NETWORK_KEYS, nameNumberedNetworkTags, refKeyFor, refKeyOn, sizeOf } from "./platforms.js";
+import { CODE_IN_ID, NETWORK_KEYS, isPlatform, nameNumberedNetworkTags, numberedNetworks, refKeyFor, refKeyOn, sizeOf, swapSlot } from "./platforms.js";
 import { settings } from "./settings.js";
-import { log } from "./util.js";
+import { listIn, log, setList, splitTag, unique } from "./util.js";
 
-const split = (value) => (value ?? "").split(";").map((v) => v.trim()).filter(Boolean);
-const isPlatform = (t) => t?.public_transport === "platform" || t?.highway === "bus_stop";
-const positionOf = (o) => (o.lat !== undefined ? [o.lat, o.lon] : o.center ?? null);
 
 /** Networks of a platform, network=* first. */
 export function networksOf(t) {
-  const numbered = Object.keys(t).filter((k) => /^network:\d+$/.test(k)).sort((a, b) => Number(a.slice(8)) - Number(b.slice(8)));
-  return [...new Set([t.network, ...numbered.map((k) => t[k])].filter(Boolean))];
+  const numbered = numberedNetworks(t);
+  return unique([t.network, ...numbered.map((k) => t[k])].filter(Boolean));
 }
 
 /** Value -> [{network, stop}]: stop_id, stop_code and NeTEx code (only the stop_id with settings.stop_refs_from_gtfs off) of the stops called at by a single network. */
@@ -43,8 +40,7 @@ function valuesOfStops(stops, ofStop) {
     const [network] = networks;
     const values = [stop.stop_id, ...(settings.stop_refs_from_gtfs ? [stop.stop_code, CODE_IN_ID.exec(stop.stop_id)?.[1]] : [])].filter(Boolean);
     for (const value of values) {
-      if (!known.has(value)) known.set(value, []);
-      known.get(value).push({ network, pos: [Number(stop.stop_lat), Number(stop.stop_lon)] });
+      listIn(known, value).push({ network, pos: [Number(stop.stop_lat), Number(stop.stop_lon)] });
     }
   }
   return known;
@@ -61,7 +57,7 @@ function feedValues(stops) {
 /** Put the refs of a platform in the place of their network. */
 function placeValues(review, key) {
   const o = review.obj.get(key), t = o.tags, name = t.name || key;
-  const pos = positionOf(o);
+  const pos = osmPosition(o);
   const nets = networksOf(t);
   const before = review.obj.base.get(key)?.tags ?? {};
   const ownerOf = (value) => {
@@ -75,8 +71,8 @@ function placeValues(review, key) {
   for (const base of review.bases) {
     for (const holder of nets) {
       const key_ = slotOf(t, base, holder);
-      const current = split(t[key_]);
-      const lost = split(before[key_]).filter((v) => !current.includes(v)); // cut from a list "a;b" when the file was read
+      const current = splitTag(t[key_]);
+      const lost = splitTag(before[key_]).filter((v) => !current.includes(v)); // cut from a list "a;b" when the file was read
       const keep = [];
       for (const value of [...current, ...lost]) {
         const owner = ownerOf(value);
@@ -90,7 +86,7 @@ function placeValues(review, key) {
           }
         } else {
           const target = slotOf(t, base, owner);
-          const there = split(t[target]);
+          const there = splitTag(t[target]);
           if (there.includes(value)) continue;
           if (there.length) {
             if (here) {
@@ -103,8 +99,7 @@ function placeValues(review, key) {
           review.corrected.push(`${name} (${key}): ${value} ${here ? `moved from ${key_}` : "put back"} to ${target}, the place of ${owner}`);
         }
       }
-      if (keep.length) t[key_] = keep.join(";");
-      else delete t[key_];
+      setList(t, key_, keep);
     }
   }
 }
@@ -123,14 +118,7 @@ function promote(t, network, bases) {
     if (mine !== undefined) t[refKeyFor(base, old)] = mine;
     if (theirs !== undefined) t[base] = theirs;
   }
-  for (const key of NETWORK_KEYS.slice(1)) {
-    const other = refKeyFor(key, network);
-    const [a, b] = [t[key], t[other]];
-    delete t[key];
-    delete t[other];
-    if (b !== undefined) t[key] = b;
-    if (a !== undefined) t[refKeyFor(key, old)] = a;
-  }
+  for (const key of NETWORK_KEYS.slice(1)) swapSlot(t, key, refKeyFor(key, network), old);
   const suffix = number.slice("network".length);
   t.network = network;
   t[`network${suffix}`] = old;
@@ -188,7 +176,7 @@ function mergeTags(review, key, keep, drop) {
   }
   if (both) {
     delete t[number];
-    const numbered = Object.keys(t).filter((k) => /^network:\d+$/.test(k)).sort((a, b) => Number(a.slice(8)) - Number(b.slice(8)));
+    const numbered = numberedNetworks(t);
     const values = numbered.map((k) => t[k]);
     numbered.forEach((k) => delete t[k]);
     values.forEach((value, i) => { t[`network:${i + 2}`] = value; });
@@ -214,7 +202,7 @@ export function mergeNetworks(review, keep, drop) {
   review.feedNetworks.add(keep);
   for (const row of review.removed) if (row.network === drop) row.network = keep;
   const shared = new Set(platformKeys(review.obj).map((key) => networksOf(review.obj.get(key).tags)).filter((nets) => nets.length > 1).flat());
-  applyPriority(review, [...new Set(review.order.map((n) => (n === drop ? keep : n)))].filter((n) => shared.has(n)));
+  applyPriority(review, unique(review.order.map((n) => (n === drop ? keep : n))).filter((n) => shared.has(n)));
   return changed;
 }
 
@@ -279,7 +267,7 @@ function slotInfo(review, t, tag, nets) {
 export function listRefs(review) {
   return platformKeys(review.obj).flatMap((platform) => {
     const t = review.obj.get(platform).tags, nets = networksOf(t);
-    return Object.keys(t).filter((tag) => REF_TAG.test(tag)).flatMap((tag) => split(t[tag]).map((value) => {
+    return Object.keys(t).filter((tag) => REF_TAG.test(tag)).flatMap((tag) => splitTag(t[tag]).map((value) => {
       const { base, network } = slotInfo(review, t, tag, nets);
       return { platform, name: t.name || platform, tag, value, base, network, reason: obsoleteBecause(review, tag, value, base, network, nets) };
     }));
@@ -289,9 +277,7 @@ export function listRefs(review) {
 /** Take this value out of its tag. It stays in review.removed, for restoreRef. */
 export function removeRef(review, row) {
   const t = review.obj.get(row.platform).tags;
-  const left = split(t[row.tag]).filter((v) => v !== row.value);
-  if (left.length) t[row.tag] = left.join(";");
-  else delete t[row.tag];
+  setList(t, row.tag, splitTag(t[row.tag]).filter((v) => v !== row.value));
   review.removed.push(row);
   log.info(`Ref removed: ${row.name} (${row.platform}) ${row.tag}=${row.value}`);
 }
@@ -300,7 +286,7 @@ export function removeRef(review, row) {
 export function restoreRef(review, row) {
   const t = review.obj.get(row.platform).tags;
   const tag = row.base ? slotOf(t, row.base, row.network) : row.tag;
-  t[tag] = [...split(t[tag]), row.value].join(";");
+  t[tag] = [...splitTag(t[tag]), row.value].join(";");
   review.removed = review.removed.filter((r) => r !== row);
   log.info(`Ref restored: ${row.name} (${row.platform}) ${tag}=${row.value}`);
 }
@@ -323,8 +309,8 @@ function placeOperator(review, key) {
   const t = review.obj.get(key).tags, nets = networksOf(t);
   if (!nets.includes(review.operator.network)) return;
   t[slotOf(t, "operator", review.operator.network)] = review.operator.value;
-  const now = nets.flatMap((network) => split(t[slotOf(t, "operator", network)]));
-  const lost = split(review.obj.base.get(key)?.tags?.operator).filter((v) => !now.includes(v));
+  const now = nets.flatMap((network) => splitTag(t[slotOf(t, "operator", network)]));
+  const lost = splitTag(review.obj.base.get(key)?.tags?.operator).filter((v) => !now.includes(v));
   if (lost.length) review.corrected.push(`${t.name || key} (${key}): operator ${lost.join(";")} replaced by ${now.join(";")}`);
 }
 

@@ -9,12 +9,11 @@
 
 import { dist } from "./geo.js";
 import { lookup } from "./lookup.js";
-import { stopLabel, tripLabel } from "./naming.js";
+import { ARROWS, stopLabel, tripLabel } from "./naming.js";
 import { parseXml, serializeXml } from "./osm.js";
-import { counter, maxBy } from "./util.js";
+import { counter, maxBy, unique } from "./util.js";
 
 const HOMONYM_M = 1000;
-const ARROWS = /\s*(?:=>|->|→|⇒)\s*/;
 const PLATFORM_ROLES = ["platform", "platform_entry_only", "platform_exit_only"];
 const STOP_ROLES = ["stop", "stop_entry_only", "stop_exit_only"];
 const SEP = "\u0001";
@@ -62,7 +61,7 @@ function routeStops(rel, objs, key) {
 export function chooseVias(stops) {
   const middles = stops.map((s) => s.slice(1, -1));
   const sets = stops.map((s) => new Set(s));
-  const freq = counter(middles.flatMap((m) => [...new Set(m)]));
+  const freq = counter(middles.flatMap((m) => unique(m)));
   const vias = middles.map((mid, i) => {
     const todo = new Map();
     stops.forEach((_, j) => {
@@ -75,7 +74,7 @@ export function chooseVias(stops) {
       chosen.add(pick);
       for (const [j, d] of todo) if (d.has(pick)) todo.delete(j);
     }
-    return [...new Set(mid)].filter((k) => chosen.has(k));
+    return unique(mid).filter((k) => chosen.has(k));
   });
   const same = (a, b) => a.length === b.length && a.every((k, n) => k === b[n]);
   for (let pass = 0; pass < stops.length; pass++) {
@@ -86,7 +85,7 @@ export function chooseVias(stops) {
         const parting = at < 0 ? middles[i].length : at;
         for (const r of [i, j]) {
           const kept = new Set([...vias[r], middles[r][parting]].filter(Boolean));
-          vias[r] = [...new Set(middles[r])].filter((k) => kept.has(k));
+          vias[r] = unique(middles[r]).filter((k) => kept.has(k));
         }
       }
     }

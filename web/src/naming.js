@@ -4,7 +4,10 @@
 // "Bus 12: VILLE Arret ↔ VILLE Arret" ("A1 / A2 ↔ B" when several origins share a terminus). The stops are labelled by routeLabel. The stops themselves get name = "Arret" and official_name = "VILLE - Arret" (stopNames).
 
 import { settings } from "./settings.js";
-import { counter, mostCommon } from "./util.js";
+import { capitalized, counter, mostCommon, unique } from "./util.js";
+
+/** What separates the stops in a title: any arrow a mapper writes. */
+export const ARROWS = /\s*(?:=>|->|→|⇒)\s*/;
 
 export const unaccent = (s) => s.normalize("NFKD").replace(/\p{M}/gu, "");
 
@@ -216,7 +219,7 @@ export function routeName(mode, ref, ...labels) {
 }
 
 /** What comes before the ref in the names of the relations of a mode. */
-export const modePrefix = (mode) => settings.prefixes[mode] || mode[0].toUpperCase() + mode.slice(1);
+export const modePrefix = (mode) => settings.prefixes[mode] || capitalized(mode);
 
 /** A stop as every title shows it, "VILLE Arret": its first, last and via stops alike. places: the names of its place, see routeLabel. */
 export const stopLabel = ({ name, official_name, places = [] }) => routeLabel(places, official_name ?? name);
@@ -260,6 +263,6 @@ export function masterLabel(endpoints) {
 export function masterEndpointsLabel(endpoints) {
   const names = endpoints.flat();
   const hub = mostCommon(counter(names))[0][0];
-  const others = [...new Set(names.filter((n) => n !== hub))];
+  const others = unique(names.filter((n) => n !== hub));
   return others.length ? `${others.join(" / ")} ↔ ${hub}` : hub;
 }

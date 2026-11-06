@@ -7,7 +7,7 @@ const fieldOf = new Map(); // key -> {read, write, row, error}
 let overrides = {};
 let onChange = () => {};
 
-const el = (tag, props = {}, ...children) => {
+export const el = (tag, props = {}, ...children) => {
   const node = Object.assign(document.createElement(tag), props);
   node.append(...children);
   return node;
@@ -251,5 +251,5 @@ export function initSettings(changed) {
     status("good", "All settings are back to their defaults.");
     onChange();
   });
-  return { settings, status };
+  return { status };
 }

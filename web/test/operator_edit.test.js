@@ -7,6 +7,7 @@ import { clearCaches, services } from "../src/net.js";
 import { heldByOthers, runOperatorEdit, withOperators } from "../src/operator_edit.js";
 import { parseXml } from "../src/osm.js";
 import { configure } from "../src/settings.js";
+import { summaryText } from "../src/util.js";
 
 const GTFS = {
   "agency.txt": "agency_id,agency_name\nAG,Twisto\n",
@@ -78,7 +79,7 @@ test("added on the relations, platforms and stop_positions of the line, and not 
   }
   assert.ok(!out.has("r32"));
   assert.ok(!out.has("n3")); // already has it
-  assert.deepEqual(summary, { "changed routes": 1, "changed route_masters": 1, "changed platforms": 1, "changed stop_positions": 1 });
+  assert.deepEqual(summary, { "Routes changed": "1 of 1", "Route_masters changed": "1 of 1", "Platforms changed": "1 of 2", "Stop_positions changed": "1 of 1" }); // n3 already has it
 });
 
 test("only operator changes: the other tags and the members stay exactly as mapped", async () => {
@@ -124,7 +125,7 @@ test("removed: stays on a stop another line with this operator uses, and is repo
   const out = read(xml);
   assert.ok(!out.has("n3"));
   assert.ok(!("operator" in out.get("r30").tags));
-  assert.equal(summary["stops kept for another line"], 1);
+  assert.equal(summary["Kept for another line"], "1 stop");
 });
 
 test("removed from a stop of no other line with this operator", async () => {
@@ -140,8 +141,8 @@ test("removed: stays when the other line only has it on its route_master", async
   answer.relations[0].tags.operator = "Keolis";
   const { xml, summary } = await run({ action: "remove" });
   assert.ok(!read(xml).has("n3"));
-  assert.equal(summary["stops kept for another line"], 1);
-  assert.equal(summary["stops to check"], undefined);
+  assert.equal(summary["Kept for another line"], "1 stop");
+  assert.equal(summary["To check"], undefined);
 });
 
 test("removed: stays next to a line without an operator, to check", async () => {
@@ -149,7 +150,7 @@ test("removed: stays next to a line without an operator, to check", async () => 
   answer.relations[0].tags.operator = "Keolis";
   const { xml, summary } = await run({ action: "remove" });
   assert.ok(!read(xml).has("n3"));
-  assert.equal(summary["stops to check"], 1);
+  assert.equal(summary["To check"], "1 stop");
 });
 
 test("removed: a line of another mode, found from the stop itself, counts too", async () => {
@@ -177,7 +178,7 @@ test("changed: on a stop of this line alone it is replaced in place, on a shared
   assert.equal(out.get("r31").tags.operator, "RATP Dev"); // its route_master had none
   assert.equal(out.get("n3").tags.operator, "RATP Dev;Keolis"); // line 13 keeps Keolis, and Twisto is the first network here
   assert.ok(!out.has("r32"));
-  assert.equal(summary["stops kept for another line"], 1);
+  assert.equal(summary["Kept for another line"], "1 stop");
 });
 
 test("add: the operators of the other lines stay on the stop", async () => {
@@ -185,6 +186,31 @@ test("add: the operators of the other lines stay on the stop", async () => {
   answer.objects[2].tags.operator = "RATP Dev";
   answer.objects[2].tags.network = "Twisto";
   assert.equal(read((await run()).xml).get("n3").tags.operator, "RATP Dev;Keolis");
+});
+
+test("the count: what was chosen only, each stop once, as what it is tagged", async () => {
+  // the platform n1 has the wrong role in a second variant, the stop_position n2 is there twice
+  answer.relations[0].members.push(member("node", 1, "stop"), member("node", 2, "stop"));
+  answer.relations.push({ type: "relation", id: 34, version: 1, tags: { ...answer.relations[0].tags }, members: [member("node", 1, "stop"), member("node", 2, "stop")] });
+  answer.objects[1].tags.operator = "Keolis";
+  let { summary } = await run({ targets: { routes: false, platforms: true, stops: false } });
+  assert.deepEqual(summary, { "Platforms changed": "1 of 2" });
+  clearCaches();
+  answer.objects[1].tags.operator = "RATP Dev";
+  ({ summary } = await run({ targets: { routes: false, platforms: false, stops: true } }));
+  assert.deepEqual(summary, { "Stop_positions changed": "1 of 1" });
+});
+
+test("a stop without a tag counts as its role, one OSM does not give is left out of the count", async () => {
+  delete answer.objects[1].tags.public_transport;
+  answer.objects = answer.objects.filter((o) => o.id !== 3);
+  const { summary } = await run();
+  assert.equal(summary["Stop_positions changed"], "1 of 1");
+  assert.equal(summary["Platforms changed"], "1 of 1");
+});
+
+test("summaryText: a number before its word, singular for 1, a text after its label", () => {
+  assert.equal(summaryText({ stops: 12, "kept traces": 1, "Platforms changed": "2 of 3", "To check": "1 stop" }), "12 stops · 1 kept trace · Platforms changed: 2 of 3 · To check: 1 stop");
 });
 
 test("a platform drawn as a way keeps its nodes in the file", async () => {

@@ -4,8 +4,9 @@
 // Modules read settings.<name> when they run, so that a change on the page, or in a test, takes effect everywhere. "auto"
 // values are replaced during a run by what is detected from the online services (see detect.js). A number has a unit, shown on the page.
 
+import { capitalized } from "./util.js";
+
 const AUTO = "auto";
-const capitalized = (s) => s[0].toUpperCase() + s.slice(1);
 const NAMED_MODES = ["bus", "coach", "trolleybus", "tram", "train", "subway", "ferry", "monorail", "funicular", "aerialway"];
 export const SECTIONS = ["thresholds", "services", "prefixes"];
 
