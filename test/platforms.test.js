@@ -574,3 +574,16 @@ test("stop_position_own: on by default, the new one stands in front of this stop
   assert.equal(spot.node, null);
   approx(spot.pos[0], 49.0004, 0.00002);
 });
+
+test("stop_refs_from_gtfs off: the codes of the GTFS are not written, the ref of OSM stays", () => {
+  settings.stop_refs_from_gtfs = false;
+  settings.ref_from_stop_id = "yes";
+  const stop = { stop_name: "Gare", stop_code: "WRONG" };
+  const tags = stopTags(stop, "FR:14118:ZE:code:X", { network: "Twisto" });
+  assert.equal(tags.ref, undefined);
+  assert.equal(tags["gtfs:stop_code"], undefined);
+  assert.equal(tags["gtfs:stop_id"], "FR:14118:ZE:code:X");
+  const obj = new Store({ n1: { lat: 49, lon: 1, tags: { name: "Gare", network: "Twisto", ref: "GOOD" } } });
+  enrich(obj, "n1", tags);
+  assert.equal(obj.get("n1").tags.ref, "GOOD");
+});

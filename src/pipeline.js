@@ -242,7 +242,7 @@ async function prepareStops(feed, { allStops }, box, osmStops, detected) {
   }
   const area = allStops.filter((s) => inBbox(latlon(s), box)).map((s) => ({ ...s, stop_name: cleanStopName(s.stop_name) }));
   const stops = matchStops(area, await feed.stopAgencies(), osmStops);
-  if (settings.ref_from_stop_id === "auto") {
+  if (settings.ref_from_stop_id === "auto" && settings.stop_refs_from_gtfs) {
     settings.ref_from_stop_id = detectRefFromStopId(stops, osmStops);
     if (settings.ref_from_stop_id) detected.push(["Platform ref", "code of the NeTEx stop_id"]);
   }
