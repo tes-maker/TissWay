@@ -22,7 +22,7 @@ import { lookup } from "./lookup.js";
 import { accentsFrom, agencyNetworks, cleanStopName, fixAccents, nameKey, slug, stopLabel, stopNames, words } from "./naming.js";
 import { services, valhallaReady } from "./net.js";
 import { Store, completeWayNodes, platformsIn, readWays, routesIn, writeOsm } from "./osm.js";
-import { filterRoadPlatforms, nameNumberedNetworkTags, networkKeyFor, tagPlatforms } from "./platforms.js";
+import { filterRoadPlatforms, lostStops, nameNumberedNetworkTags, networkKeyFor, tagPlatforms } from "./platforms.js";
 import { reviewRefs } from "./ref_review.js";
 import { activeFeed, settings } from "./settings.js";
 import { splitWays } from "./splitting.js";
@@ -339,6 +339,7 @@ export async function runRoutes(feed, { network = null, ref = null, onProgress =
     const tags = networks[route.agency_id] || { network: route.agency_id || "GTFS" };
     buildLine(route, routeVariants, obj, stops, tags, assignments, created, existing);
   }
+  for (const id of lostStops(variants, stops, assignments)) log.warn(`${stops.df.get(id).stop_name} (${id}) is on OSM platform ${[...stops.holders.get(id)].join(", ")} and served in the GTFS, but no relation uses it: another stop took its place (to check)`);
   const owners = await stopNetworks(feed, networks);
   for (const x of tagPlatforms(obj, stops, assignments, owners)) log.warn(`stop_id already on another OSM platform, not set (to check): ${x}`);
   onProgress("Splitting ways…"); // after the relations: ways are also cut at the stop_positions of the termini
