@@ -1,6 +1,6 @@
 // The Settings page, generated from SCHEMA (src/settings.js). Only what differs from the defaults is kept, in this browser.
 
-import { ITEMS, SCHEMA, SECTIONS, configure, settings } from "./src/settings.js";
+import { ITEMS, SCHEMA, SECTIONS, configure } from "./src/settings.js";
 
 const STORE = "tissway.settings";
 const fieldOf = new Map(); // key -> {read, write, row, error}

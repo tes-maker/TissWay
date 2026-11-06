@@ -151,6 +151,12 @@ export const stopPositionsAround = (points, radius) => {
   return overpass(`(${around})->.s;.s out meta;way(bn.s)[highway]->.w;.w out meta;node(w.w);out meta;`).then(fromOverpass);
 };
 
+/** {key: object} of the stop_positions of a bbox, see stops.pairStopPositions. */
+export const stopPositionsIn = (box) => overpass(`node[public_transport=stop_position](${bboxText(box)});out meta;`).then(fromOverpass);
+
+/** The roads within radius metres of these points [lat, lon], and their nodes. */
+export const roadsAround = (points, radius) => overpass(`(${points.map(([lat, lon]) => `way[highway](around:${radius},${lat},${lon});`).join("")})->.w;.w out meta;node(w.w);out meta;`).then(fromOverpass);
+
 /** Route relations of these modes with a member in a bbox, and their route masters. */
 export const routesIn = (box, modes) => {
   const b = bboxText(box), rx = modes.filter((m) => /^\w+$/.test(m)).join("|");

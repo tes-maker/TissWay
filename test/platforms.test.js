@@ -488,7 +488,7 @@ test("a ref written a;b keeps one value, the GTFS gives the value of its network
 const faceToFace = (holders) => {
   const s = makeStops([gtfsStop("E", "42A", 49.0005, EAST), gtfsStop("W", "42B", 49.0005, WEST)], holders ? { holders } : {});
   const obj = new Store({ nP: node(49.0005, 1.00018, { name: "Laplace" }) });
-  const on = (lon) => new Map([["nP", [NOMAD, [49.0005, 1.00018], "bus"]]]);
+  const on = () => new Map([["nP", [NOMAD, [49.0005, 1.00018], "bus"]]]);
   return [obj, s, new Map([["W", on()], ["E", on()]])];
 };
 
@@ -592,7 +592,8 @@ test("enrich: the name of an OSM platform saying its town is corrected, official
 // --- a stop_position closer to the opposite stop (stop_position_own)
 
 for (const [what, lat, after, pos, rival, own, off] of [
-  ["a few metres away, in front of the rival", 49.00048, "r2", [49.0004, EAST], [49.00048, WEST], null, "nSP"],
+  ["a few metres away, in front of the rival: shared rather than duplicated", 49.00048, "r2", [49.0004, EAST], [49.00048, WEST], "nSP", "nSP"],
+  ["further than stop_position_shared_m, in front of the rival", 49.00052, "r3", [49.0004, EAST], [49.00052, WEST], null, null],
   ["nearly face to face, closer to the rival", 49.000508, "r3", [49.0004, EAST], [49.00047, WEST], null, "nSP"],
   ["in front of this stop, the rival further on", 49.0004, "r2", [49.0004, EAST], [49.0006, WEST], "nSP", "nSP"],
   ["stops facing each other share it", 49.0005, "r3", [49.0004, EAST], [49.0004, WEST], "nSP", "nSP"],
@@ -617,7 +618,7 @@ test("stop_position_own: a platform set back from the road does not lose to one 
 
 test("stop_position_own: on by default, the new one stands in front of this stop", () => {
   assert.equal(settings.stop_position_own, true);
-  const spot = locateStop(withStopPosition(street(), "nSP", 49.00048, "r2"), ["wR"], [49.0004, EAST], { rivals: [[49.00048, WEST]] });
+  const spot = locateStop(withStopPosition(street(), "nSP", 49.00052, "r3"), ["wR"], [49.0004, EAST], { rivals: [[49.00052, WEST]] });
   assert.equal(spot.node, null);
   approx(spot.pos[0], 49.0004, 0.00002);
 });
