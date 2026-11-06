@@ -188,7 +188,8 @@ Wikidata when a single entry is confirmed. On a platform shared with another net
 
 `operator` never comes from the GTFS: its agency is often not the real operator (often a subcontractor). It comes from the "Operator of the
 line" setting, else from relations of the line already in OSM. On a platform shared with another network, operators follow the ref
-priorities: `network=Twisto;Nomad`, `operator=RATP Dev Caen la mer;Keolis`.
+priorities: `network=Twisto;Nomad`, `operator=RATP Dev Caen la mer;Keolis`. The **Operator** format adds, removes or changes one operator on a line already in OSM (relations,
+platforms, stop_positions, as chosen), without changing anything else on these objects. A stop keeps the operators its other lines need.
 
 ## Review in JOSM
 

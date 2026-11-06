@@ -67,11 +67,33 @@
         <label><input type="radio" name="format" value="routes" checked><span><b>Route relations</b><small>.osm</small></span></label>
         <label><input type="radio" name="format" value="platforms"><span><b>Platforms</b><small>.osm + .csv</small></span></label>
         <label><input type="radio" name="format" value="ptna"><span><b>PTNA list</b><small>.txt</small></span></label>
+        <label><input type="radio" name="format" value="operator"><span><b>Operator</b><small>.osm</small></span></label>
       </fieldset>
 
       <div data-panel="routes" class="panel">
         <label class="check"><input id="split-roundabouts" type="checkbox" role="switch"> Split roundabouts</label>
         <label class="check"><input id="stop-refs-from-gtfs" type="checkbox" role="switch"> Take the stop refs from the GTFS</label>
+      </div>
+
+      <div data-panel="operator" class="panel" hidden>
+        <p class="hint">Adds, removes or changes one operator on a line already in OSM. Only the <code>operator</code> tag changes. A stop keeps what its other lines need: the file never takes an operator from them.</p>
+        <div class="pair">
+          <label>Action
+            <select id="operator-action">
+              <option value="add">Add</option>
+              <option value="remove">Remove</option>
+              <option value="change">Change</option>
+            </select>
+          </label>
+          <label><span id="operator-value-label">Operator</span> <input id="operator-value" placeholder="Keolis" spellcheck="false" autocomplete="off"></label>
+        </div>
+        <label id="operator-new-box" hidden>New operator <input id="operator-new" placeholder="RATP Dev" spellcheck="false" autocomplete="off"></label>
+        <label class="check"><input id="operator-routes" type="checkbox" role="switch" checked> Line (route and route_master relations)</label>
+        <label class="check"><input id="operator-platforms" type="checkbox" role="switch" checked> Platforms</label>
+        <label class="check"><input id="operator-stops" type="checkbox" role="switch" checked> Stop_positions</label>
+      </div>
+
+      <div data-panel="routes operator" class="panel">
         <label>Line, one at a time
           <input id="line-filter" type="search" placeholder="Search a line: 122, Caen…" autocomplete="off">
         </label>

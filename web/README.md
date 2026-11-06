@@ -19,6 +19,7 @@ npm test      # node --test, no install needed. Node >= 20.
 | Platforms | `.osm` completing the existing platforms of a network with its GTFS stops, and a CSV of the stops without a platform. |
 | PTNA list | The PTNA wiki page of a network, generated or updated from the current page. |
 | (drop an `.osm` file instead of a feed) | Adds "via …" to relations sharing a name in that file. |
+| Operator | `.osm` adding, removing or changing one operator on a line already in OSM: its route and route_master relations, its platforms, its stop_positions, as chosen. Only the `operator` tag changes. |
 | (bottom of Settings) Correct a whole network | `.osm` putting the stops and relation names already mapped for a network in the form of this site, without changing a trace. |
 
 Nothing is ever uploaded to OSM: the file goes through a human, in JOSM.
@@ -80,6 +81,7 @@ and GTFS keys, and `test/pipeline.test.js` runs them on generated relations.
 - **operator**: never taken from the GTFS (its agency is often not the real operator). The "Operator of the line" setting puts it on the relations of the line converted and on its platforms, not on
   stop_positions, and replaces what the network of the line had, as listed in the window before the download. On a shared stop, operators follow the ref priorities: `network=Twisto;Nomad`,
   `operator=RATP Dev Caen la mer;Keolis`. An operator already mapped belongs to the network owning the stop, and moves with it when the order changes. Without the setting, a line shares the operator its mapped relations agree on.
+  The Operator format changes this one tag on one line and nothing else. Added to a shared platform, it comes first when the line's network does, else last; changed, it keeps its place. A stop never loses what its other lines need, whatever their mode: an operator one of them has (on its route or route_master) stays, and next to a line without any operator it stays too, reported to check. A new operator goes next to it.
 
 **Left out on purpose:** `interval` and `opening_hours` need a calendar reading that could be wrong; `gtfs:release_date` is not given reliably by feeds.
 
