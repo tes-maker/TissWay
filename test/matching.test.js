@@ -40,3 +40,15 @@ test("chunks overlap and respect the limits", () => {
   assert.ok(out.every(([s, e]) => e - s <= 3));
   assert.ok(out.slice(1).every(([s], k) => s === out[k][1])); // one point of overlap
 });
+
+test("one shape for several variants: Valhalla asked once, the stops of each judged", async () => {
+  let calls = 0;
+  const real = valhalla.mapMatch;
+  valhalla.mapMatch = (points) => { calls++; return real(points); };
+  const matched = new Map();
+  assert.deepEqual(await matchVariant(ON_ROAD, STOPS, matched), [["w1"], "shape"]);
+  assert.deepEqual(await matchVariant(ON_ROAD, STOPS, matched), [["w1"], "shape"]);
+  assert.equal(calls, 1);
+  assert.deepEqual(await matchVariant(ON_ROAD, [[49.0, 1.1], [49.01, 1.1]], matched), [["w1"], "shape"]); // routed: no better, the shape stays
+  assert.equal(calls, 2); // only the route through the stops
+});

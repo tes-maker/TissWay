@@ -5,7 +5,7 @@
 import { cachedJson } from "./net.js";
 import { nameKey, unaccent } from "./naming.js";
 import { settings } from "./settings.js";
-import { log } from "./util.js";
+import { log, unique } from "./util.js";
 
 const WIKIDATA_API = "https://www.wikidata.org/w/api.php";
 const WIKIDATA_SPARQL = "https://query.wikidata.org/sparql";
@@ -50,7 +50,7 @@ export const lookup = {
    * or the village in it (Thue et Mue, not Brouay), and not municipality, which is the arrondissement there (Caen for all of these) unless nothing else is known. */
   async placesAt(lat, lon, lang) {
     const a = await lookup.reverse(lat, lon, lang);
-    if (a.country_code !== "fr") return [...new Set([a.village, a.town, a.city, a.municipality].filter(Boolean))];
+    if (a.country_code !== "fr") return unique([a.village, a.town, a.city, a.municipality].filter(Boolean));
     return [a.city ?? a.town ?? a.village ?? a.municipality].filter(Boolean);
   },
 
@@ -77,7 +77,7 @@ export const lookup = {
   },
 
   /** ISO code ("fr") of the country at a position, null if unknown. */
-  countryAt: async (lat, lon) => (await lookup.reverse(lat, lon)).country_code || null,
+  countryAt: async (lat, lon, lang) => (await lookup.reverse(lat, lon, lang)).country_code || null,
 
   /** "left" or "right" in a country (ISO code), null if unknown. */
   drivingSide(country) {
@@ -95,7 +95,7 @@ export const lookup = {
     const out = new Map();
     if (!lang || lang === "en") return Promise.resolve(out);
     const api = `https://${lang}.wiktionary.org/w/api.php?format=json&origin=*&action=query`;
-    const todo = [...new Set(words.map((w) => w.toLowerCase()))].filter((w) => w.length > 2 && isAscii(w)).sort();
+    const todo = unique(words.map((w) => w.toLowerCase())).filter((w) => w.length > 2 && isAscii(w)).sort();
     return soft("Wiktionary", out, async () => {
       const unknown = [];
       for (let i = 0; i < todo.length; i += BATCH) {

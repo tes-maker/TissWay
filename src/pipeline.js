@@ -22,12 +22,12 @@ import { lookup } from "./lookup.js";
 import { accentsFrom, agencyNetworks, cleanStopName, fixAccents, nameKey, slug, stopLabel, stopNames, words } from "./naming.js";
 import { services, valhallaReady } from "./net.js";
 import { Store, completeWayNodes, platformsIn, readWays, routesIn, writeOsm } from "./osm.js";
-import { filterRoadPlatforms, lostStops, nameNumberedNetworkTags, networkKeyFor, tagPlatforms } from "./platforms.js";
+import { filterRoadPlatforms, lostStops, nameNumberedNetworkTags, refKeyFor, tagPlatforms } from "./platforms.js";
 import { reviewRefs } from "./ref_review.js";
 import { activeFeed, settings } from "./settings.js";
 import { splitWays } from "./splitting.js";
 import { matchStops } from "./stops.js";
-import { dedupe, listIn, log, sortedBy } from "./util.js";
+import { dedupe, listIn, log, sortedBy, unique } from "./util.js";
 
 export class SelectionError extends Error {}
 
@@ -41,7 +41,7 @@ export function selectRoutes(routes, networks, network = null, refs = []) {
     const wanted = network.trim().toLowerCase();
     out = out.filter((r) => (networks[r.agency_id]?.network || "").toLowerCase() === wanted);
     if (!out.length) {
-      const known = [...new Set(Object.values(networks).map((n) => n.network))].sort().join(", ");
+      const known = unique(Object.values(networks).map((n) => n.network)).sort().join(", ");
       throw new SelectionError(`No ${settings.modes.join("/")} line in network "${network}". Available networks: ${known}`);
     }
   }
@@ -90,7 +90,7 @@ export function completeWikis(obj, networks) {
     for (const key of networkTags) {
       const network = tags[key];
       for (const [wiki, value] of Object.entries(wikis[network] || {})) {
-        const target = key === "network" ? wiki : networkKeyFor(wiki, network);
+        const target = key === "network" ? wiki : refKeyFor(wiki, network);
         if (!(target in tags)) added[target] = value;
       }
     }
@@ -109,16 +109,22 @@ async function mapLines(feed, routes, trips, stops, networks, existing, onProgre
   for (const t of trips) listIn(byRoute, t.route_id).push(t);
   const pending = routes.map((route) => [route, lineVariants(byRoute.get(route.route_id) || [])]);
   const total = pending.reduce((n, [, vs]) => n + vs.length, 0);
-  const shapes = await feed.shapes(pending.flatMap(([, vs]) => vs.map((v) => v.shape_id).filter(Boolean)));
-  const lines = [];
+  const keptOf = new Map();
   let roads = {}, done = 0;
   for (const [route, found] of pending) {
-    const label = route.route_short_name || route.route_id, variants = [];
+    const label = route.route_short_name || route.route_id;
     onProgress(`Existing traces of line ${label} (Overpass)…`);
     const network = (networks[route.agency_id] || { network: route.agency_id || "GTFS" }).network;
     const { kept, roads: read } = await keepTraces(route, found, network, existing, stops);
+    keptOf.set(route, kept);
     roads = { ...roads, ...read };
     if (kept.size) log.info(`line ${label}: ${kept.size} of ${found.length} trace(s) kept from OSM: ${[...kept.values()].map(([k]) => k).join(", ")}`);
+  }
+  const shapes = await feed.shapes(pending.flatMap(([route, vs]) => vs.filter((v) => !keptOf.get(route).has(v)).map((v) => v.shape_id).filter(Boolean)));
+  const matched = new Map(); // a shape several variants follow is map-matched once
+  const lines = [];
+  for (const [route, found] of pending) {
+    const label = route.route_short_name || route.route_id, variants = [], kept = keptOf.get(route);
     for (const v of found) {
       onProgress(`Map-matching: line ${label}, variant ${++done}/${total}`);
       if (kept.has(v)) {
@@ -127,7 +133,7 @@ async function mapLines(feed, routes, trips, stops, networks, existing, onProgre
         continue;
       }
       try {
-        const [ways, source] = await matchVariant(shapes.get(v.shape_id), stops.positions(v.seq));
+        const [ways, source] = await matchVariant(shapes.get(v.shape_id), stops.positions(v.seq), matched);
         variants.push({ ...v, ways, source });
       } catch (e) {
         if (e.name === "AbortError") throw e;
@@ -214,10 +220,10 @@ async function readSelection(feed, network, ref) {
   const known = new Map(allStops.map((s) => [s.stop_id, s]));
   const selected = (await feed.trips()).filter((t) => routeIds.has(t.route_id));
   const stopTimes = await feed.stopTimes(selected.map((t) => t.trip_id));
-  const unknown = [...new Set(stopTimes.filter((st) => !known.has(st.stop_id)).map((st) => st.stop_id))];
+  const unknown = unique(stopTimes.filter((st) => !known.has(st.stop_id)).map((st) => st.stop_id));
   if (unknown.length) log.warn(`${unknown.length} stop_id(s) of stop_times missing from stops.txt (skipped): ${unknown.slice(0, 10).join(", ")}`);
   const trips = stopSequences(selected, stopTimes.filter((st) => known.has(st.stop_id)));
-  const used = [...new Set(trips.flatMap((t) => t.stop_seq))];
+  const used = unique(trips.flatMap((t) => t.stop_seq));
   if (!used.length) throw new SelectionError("No stop for this selection in the GTFS.");
   log.info(`${routes.length} line(s), ${trips.length} trip(s), ${used.length} stop(s)`);
   return { allNetworks, routes, allStops, known, trips, used };
@@ -314,7 +320,7 @@ export async function runRoutes(feed, { network = null, ref = null, onProgress =
   const { allNetworks, routes, known, trips, used } = selection;
 
   const detected = [];
-  const country = settings.driving_side === "auto" || settings.network_auto ? await lookup.countryAt(...latlon(known.get(used[0]))) : null;
+  const country = settings.driving_side === "auto" || settings.network_auto ? await lookup.countryAt(...latlon(known.get(used[0])), lang) : null;
   await detectDrivingSide(country, detected);
 
   onProgress("OSM platforms (Overpass)…");
@@ -348,8 +354,8 @@ export async function runRoutes(feed, { network = null, ref = null, onProgress =
   const n = completeWikis(obj, networks);
   if (n) log.info(`network:wikidata / network:wikipedia completed on ${n} relation(s) / platform(s)`);
   await completeWayNodes(obj);
-  const review = reviewRefs(obj, { ...owners, stops: await feed.stops(), feed: activeFeed(), network: lines[0][0] && (networks[lines[0][0].agency_id]?.network ?? (lines[0][0].agency_id || "GTFS")) });
+  const review = reviewRefs(obj, { ...owners, stops: await feed.stops(), feed: activeFeed(), network: networks[lines[0][0].agency_id]?.network ?? (lines[0][0].agency_id || "GTFS") });
 
   const summary = { lines: lines.length, variants: variants.length, stops: used.length, "kept traces": variants.filter((v) => v.kept_from).length, "complete relations": variants.filter((v) => v.complete).length };
-  return { xml: writeOsm(obj), review, filename: outputName(network, routes), detected, summary, state: { routes, trips, stops, lines, obj, networks, assignments } };
+  return { get xml() { return writeOsm(obj); }, review, filename: outputName(network, routes), detected, summary, state: { routes, trips, stops, lines, obj, networks, assignments } };
 }

@@ -2,7 +2,7 @@
 // API keys only ever leave the browser towards the service they belong to, and are never written to the journal.
 
 import { settings } from "./settings.js";
-import { log } from "./util.js";
+import { log, unique } from "./util.js";
 
 // Servers and keys are settings (see settings.js); signal is the AbortSignal of the running task (Cancel button).
 export const services = settings.services;
@@ -168,7 +168,7 @@ export async function feedUrls(feedId) {
     const meta = await response.json();
     const found = [meta.latest_dataset?.hosted_url, ...urls, meta.source_info?.producer_url]
       .filter((u) => typeof u === "string" && u.startsWith("https://"));
-    return { urls: [...new Set(found)], name: [meta.provider, meta.feed_name].filter(Boolean).join(" — ") };
+    return { urls: unique(found), name: [meta.provider, meta.feed_name].filter(Boolean).join(" — ") };
   } catch (e) {
     if (e.name === "AbortError") throw e;
     log.warn(`Mobility Database API not available (${e.message}): trying the public file`);
@@ -178,9 +178,9 @@ export async function feedUrls(feedId) {
 
 /** Blob of a GTFS archive, kept in the browser's cache and downloaded again only when the server has a newer
  * one. onProgress(received bytes, total bytes or 0). */
-export async function downloadGtfs(url, { force = false, onProgress = () => {} } = {}) {
+export async function downloadGtfs(url, { onProgress = () => {} } = {}) {
   const cache = globalThis.caches ? await caches.open("tissway-gtfs") : null;
-  const cached = cache && !force ? await cache.match(url) : null;
+  const cached = cache ? await cache.match(url) : null;
   if (cached) {
     const head = await request(url, { method: "HEAD" }).catch((e) => {
       if (e.name === "AbortError") throw e;

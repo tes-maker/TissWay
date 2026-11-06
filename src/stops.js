@@ -8,7 +8,7 @@
 // - its rivals: the opposite stops and the stops of the same name nearby, one of which may own an existing
 //   stop_position on the road this stop's routes use (see platforms.locateStop).
 
-import { Grid, latlon } from "./geo.js";
+import { Grid, latlon, osmPosition } from "./geo.js";
 import { stopKey } from "./naming.js";
 import { settings } from "./settings.js";
 import { setIn } from "./util.js";
@@ -45,9 +45,6 @@ export class Stops {
     return ids.map((s) => latlon(this.df.get(s)));
   }
 }
-
-/** Position of an OSM stop object: the node, or the center of a way. null without coordinates. */
-const osmPosition = (o) => o.center ?? (o.lat !== undefined ? [o.lat, o.lon] : null);
 
 /** stop_id -> Set of the OSM objects carrying it. */
 function holdersOf(osm) {

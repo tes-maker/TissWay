@@ -1,7 +1,7 @@
 // The page: reads the form, calls src/, shows the log and the files to download. No logic about GTFS or OSM here.
 // In the browser console, window.tissway gives access to the settings, the feed and everything computed by the last run.
 
-import { applySettings, fitSecrets, initSettings, modifiedCount, setOption } from "./settings_form.js";
+import { applySettings, el, fitSecrets, initSettings, modifiedCount, setOption } from "./settings_form.js";
 import { Feed } from "./src/gtfs.js";
 import { agencyNetworks, slug } from "./src/naming.js";
 import { clearCaches, downloadGtfs, feedUrls, services } from "./src/net.js";
@@ -13,7 +13,7 @@ import { runPlatforms } from "./src/platform_tags.js";
 import { applyPriority, closeNetworks, keepNetworkApart, listRefs, mergeNetworks, priorityRows, removeRef, restoreRef, sharedPlatforms } from "./src/ref_review.js";
 import { buildList, loadNetworks, refKey } from "./src/ptna.js";
 import { settings } from "./src/settings.js";
-import { log, sortedBy } from "./src/util.js";
+import { log, sortedBy, summaryText } from "./src/util.js";
 import { renameInFile } from "./src/via.js";
 
 const $ = (id) => document.getElementById(id);
@@ -74,6 +74,7 @@ async function task(fn) {
   if (state.controller) return;
   applySettings(); // what a previous run detected does not carry over
   state.controller = new AbortController();
+  state.warningsBefore = state.warnings;
   services.signal = state.controller.signal;
   showError("");
   refresh();
@@ -99,14 +100,9 @@ async function task(fn) {
 }
 
 const progress = (message) => { $("progress").textContent = message; };
-const el = (tag, props = {}, ...children) => {
-  const node = Object.assign(document.createElement(tag), props);
-  node.append(...children);
-  return node;
-};
 
 /** Show the files to download, and what the run found. */
-function showResult({ files, preview = null, summary = {}, detected = [], warningsBefore = 0 }) {
+function showResult({ files, preview = null, summary = {}, detected = [] }) {
   for (const url of state.urls) URL.revokeObjectURL(url);
   state.urls = [];
   $("downloads").replaceChildren(...files.map(({ name, text, type }) => {
@@ -114,8 +110,8 @@ function showResult({ files, preview = null, summary = {}, detected = [], warnin
     state.urls.push(a.href);
     return a;
   }));
-  $("summary").textContent = Object.entries(summary).map(([k, v]) => `${v} ${v === 1 ? k.replace(/s$/, "") : k}`).join(" · ");
-  const warnings = state.warnings - warningsBefore;
+  $("summary").textContent = summaryText(summary);
+  const warnings = state.warnings - state.warningsBefore;
   $("show-warnings").textContent = `${warnings} warning${warnings > 1 ? "s" : ""} to check`;
   $("show-warnings").hidden = !warnings;
   $("detected").replaceChildren(...detected.flatMap(([k, v]) => [el("dt", { textContent: k }), el("dd", { textContent: v })]));
@@ -276,7 +272,7 @@ function closeReview() {
 }
 
 function hideResult() {
-  state.review = null;
+  state.review = state.showReviewed = null;
   $("result").hidden = true;
   showError("");
 }
@@ -355,7 +351,7 @@ function takeFile(file) {
 
 /** Back to the start: nothing loaded, nothing shown. */
 function reset() {
-  state.feed = null;
+  state.feed = window.tissway.feed = window.tissway.last = null;
   state.viaFile = null;
   state.line = null;
   $("file-input").value = "";
@@ -440,8 +436,6 @@ const operatorTargets = () => ({ routes: $("operator-routes").checked, platforms
 /** What the button says for the Operator format, and whether it can do it yet. */
 function operatorLabel(line) {
   const operator = $("operator-value").value.trim(), action = $("operator-action").value, next = $("operator-new").value.trim();
-  $("operator-new-box").hidden = action !== "change";
-  $("operator-value-label").textContent = action === "change" ? "Current operator" : "Operator";
   if (!line) return { text: "Turn on a line", ready: false };
   if (!operator) return { text: "Enter an operator", ready: false };
   if (action === "change" && !next) return { text: "Enter the new operator", ready: false };
@@ -460,44 +454,49 @@ function refreshConvert() {
     return;
   }
   const line = checkedLine();
+  const action = $("operator-action").value, operator = operatorLabel(line);
+  $("operator-new-box").hidden = action !== "change";
+  $("operator-value-label").textContent = action === "change" ? "Current operator" : "Operator";
   const labels = {
     routes: line ? `Convert line ${line.route_short_name || line.route_long_name} to .osm` : "Turn on a line",
     platforms: "Convert the platforms to .osm",
     ptna: "Create the PTNA list",
-    operator: operatorLabel(line).text,
+    operator: operator.text,
   };
   button.textContent = labels[format()];
-  button.disabled = !$("network").value || (format() === "routes" && !line) || (format() === "operator" && !operatorLabel(line).ready);
+  button.disabled = !$("network").value || (format() === "routes" && !line) || (format() === "operator" && !operator.ready);
 }
 
 // --- exports ----------------------------------------------------------------------------------------------
 
-const OSM_TYPE = "application/xml";
+const osmFile = (name, text) => ({ name, text, type: "application/xml" });
 const selectedNetwork = () => {
   const network = $("network").value;
   if (!network) throw new Error("Choose a network first.");
   return network;
 };
 
-async function exportRoutes() {
-  const network = selectedNetwork();
+const selectedLine = () => {
   const line = checkedLine();
   if (!line) throw new Error("Turn on a line.");
-  const warningsBefore = state.warnings;
+  return line;
+};
+
+async function exportRoutes() {
+  const network = selectedNetwork();
+  const line = selectedLine();
   const result = await runRoutes(state.feed, { network, ref: line.route_id, onProgress: progress });
   window.tissway.last = result.state;
-  offerReview(result.review, () => showResult({ files: [{ name: result.filename, text: writeOsm(result.review.obj), type: OSM_TYPE }], summary: result.summary, detected: result.detected, warningsBefore }));
+  offerReview(result.review, () => showResult({ files: [osmFile(result.filename, writeOsm(result.review.obj))], summary: result.summary, detected: result.detected }));
 }
 
 async function exportPlatforms() {
-  const warningsBefore = state.warnings;
   const result = await runPlatforms(state.feed, { network: selectedNetwork(), max_m: Number($("platforms-distance").value) || 30, onProgress: progress });
-  offerReview(result.review, () => showResult({ files: [{ name: result.filename, text: writeOsm(result.review.obj), type: OSM_TYPE }, { name: result.csvName, text: result.csv, type: "text/csv" }], summary: result.summary, detected: result.detected, warningsBefore }));
+  offerReview(result.review, () => showResult({ files: [osmFile(result.filename, writeOsm(result.review.obj)), { name: result.csvName, text: result.csv, type: "text/csv" }], summary: result.summary, detected: result.detected }));
 }
 
 async function exportPtna() {
   const network = selectedNetwork();
-  const warningsBefore = state.warnings;
   progress("Reading the feed, towns of the termini…");
   const input = $("ptna-input").value;
   const networks = await loadNetworks(state.feed);
@@ -511,16 +510,14 @@ async function exportPtna() {
   for (const message of report) log.info(`  ${message}`);
   if (!report.length) log.info("  no change");
   const text = `${lines.join("\n")}\n`;
-  showResult({ files: [{ name: `ptna_${slug($("ptna-title").value.trim() || network)}.txt`, text, type: "text/plain" }], preview: text, summary: { lines: networks.get(network).length }, warningsBefore });
+  showResult({ files: [{ name: `ptna_${slug($("ptna-title").value.trim() || network)}.txt`, text, type: "text/plain" }], preview: text, summary: { lines: networks.get(network).length } });
 }
 
 async function exportOperator() {
   const network = selectedNetwork();
-  const line = checkedLine();
-  if (!line) throw new Error("Turn on a line.");
-  const warningsBefore = state.warnings;
+  const line = selectedLine();
   const { xml, filename, summary } = await runOperatorEdit(state.feed, { network, routeId: line.route_id, operator: $("operator-value").value, newOperator: $("operator-new").value, action: $("operator-action").value, targets: operatorTargets(), onProgress: progress });
-  showResult({ files: [{ name: filename, text: xml, type: OSM_TYPE }], summary, warningsBefore });
+  showResult({ files: [osmFile(filename, xml)], summary });
 }
 
 function openFix() {
@@ -536,20 +533,18 @@ function closeFix() {
   hideResult();
   selectView("generate");
   task(async () => {
-    const warningsBefore = state.warnings;
     const { xml, filename, summary, detected } = await runNetworkFix(state.feed, { network, onProgress: progress });
-    showResult({ files: [{ name: filename, text: xml, type: OSM_TYPE }], summary, detected, warningsBefore });
+    showResult({ files: [osmFile(filename, xml)], summary, detected });
   });
 }
 
 async function exportVia() {
   const file = state.viaFile;
-  const warningsBefore = state.warnings;
   const { xml, changes, warnings } = await renameInFile(await file.text(), $("via-prefix").value);
   for (const [, name] of changes) log.info(name);
   for (const w of warnings) log.warn(w);
   log.info(`${changes.length} relation(s) renamed`);
-  showResult({ files: [{ name: file.name.replace(/(\.\w+)?$/, "_renamed.osm"), text: xml, type: OSM_TYPE }], summary: { renamed: changes.length }, warningsBefore });
+  showResult({ files: [osmFile(file.name.replace(/(\.\w+)?$/, "_renamed.osm"), xml)], summary: { renamed: changes.length } });
 }
 
 // --- events -----------------------------------------------------------------------------------------------
@@ -681,7 +676,6 @@ const settingsPage = initSettings((key) => {
 try {
   $("gtfs-id").value = localStorage.getItem(FEED_STORE) || "";
 } catch { /* storage unavailable */ }
-window.tissway.settings = settings;
 wire();
 showSettingsCount();
 showOptions();

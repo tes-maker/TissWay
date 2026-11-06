@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import "./helpers.js";
-import { detectFeed, detectRefFromStopId, detectStopRefTags, networkFromOsm } from "../src/detect.js";
+import { detectFeed, detectRefFromStopId, detectStopRefTags, feedCodeOf, networkFromOsm } from "../src/detect.js";
 import { lookup, siteOf } from "../src/lookup.js";
 import { clearCaches, services } from "../src/net.js";
 import { settings } from "../src/settings.js";
@@ -213,3 +213,30 @@ for (const [name, found, yes] of [
     assert.equal(await lookup.placeNear(name, 49, 1), yes);
   });
 }
+
+test("a feed whose code is not in OSM: the whole area asked once, unless the answer failed", async () => {
+  const feed = { routes: async () => [{ route_id: "R" }], stops: async () => [{ lat: 49, lon: 1 }, { lat: 49.1, lon: 1.1 }] };
+  const real = globalThis.fetch;
+  let calls = 0, failing = true;
+  globalThis.fetch = async () => {
+    calls++;
+    return failing ? new Response("no", { status: 400 }) : new Response(JSON.stringify({ elements: [] }));
+  };
+  try {
+    assert.equal(await feedCodeOf(feed), "");
+    const afterFailure = calls;
+    assert.ok(afterFailure > 0);
+    failing = false;
+    clearCaches();
+    assert.equal(await feedCodeOf(feed), ""); // asked again: it had failed
+    assert.equal(calls, afterFailure + 1);
+    clearCaches();
+    assert.equal(await feedCodeOf(feed), ""); // known now
+    assert.equal(calls, afterFailure + 1);
+    const relations = { r1: { tags: { "gtfs:route_id:FR-X": "R" } } };
+    assert.equal(await feedCodeOf(feed, relations), "FR-X"); // what is around the line still counts
+    assert.equal(calls, afterFailure + 1);
+  } finally {
+    globalThis.fetch = real;
+  }
+});

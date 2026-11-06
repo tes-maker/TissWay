@@ -5,24 +5,21 @@
 // going to its platform; an object tagged as the other kind, or in the other role, put right (stopKind). Relations: name, from, to, via, these roles. No member moves.
 
 import { networkFromOsm } from "./detect.js";
-import { bbox, dist, latlon } from "./geo.js";
+import { bbox, dist, latlon, osmPosition } from "./geo.js";
 import { lookup } from "./lookup.js";
-import { agencyNetworks, cleanStopName, masterLabel, nameKey, routeTitle, slug, stopKey, stopLabel, stopNames, tripTitle } from "./naming.js";
+import { ARROWS, agencyNetworks, cleanStopName, masterLabel, nameKey, routeTitle, slug, stopKey, stopLabel, stopNames, tripTitle } from "./naming.js";
 import { Store, changesOsm, completeWayNodes, differsFromOsm, onRoad, readObjects, routesIn, writeOsm } from "./osm.js";
 import { selectRoutes } from "./pipeline.js";
 import { networkStops } from "./platform_tags.js";
 import { chooseVias } from "./via.js";
 import { VEHICLE, nameNumberedNetworkTags, nameNumberedRefs, stopPositionOnly, takeFromStopPosition } from "./platforms.js";
 import { settings } from "./settings.js";
-import { dedupe, listIn, log } from "./util.js";
+import { capitalized, dedupe, listIn, log, setIn, setList, splitTag, unique } from "./util.js";
 
 const PAD_M = 300;
 const SAME_PLACE_M = 200; // the stops of one name this close are in one place: opposite stops get the same official_name, and Nominatim is asked once
-const ARROWS = /\s*(?:=>|->|→|⇒)\s*/;
 
-const positionOf = (o) => o.center ?? (o.lat !== undefined ? [o.lat, o.lon] : null);
 const networksOf = (tags) => (tags.network ?? "").split(";").map(nameKey).filter(Boolean);
-const capitalized = (s) => s[0].toUpperCase() + s.slice(1);
 
 /** What comes before the ref in the names of a relation: the setting when it was changed, else what its name uses ("Car Nomad 224: …"), else fallback, else the setting. */
 export function prefixOf(tags, mode, fallback = null) {
@@ -46,9 +43,7 @@ function correctedPlatform(tags, names, { road, way, bus }) {
   nameNumberedRefs(t);
   for (const k of Object.keys(t)) {
     if (!/^gtfs:stop_name(?::|$)/.test(k)) continue;
-    const kept = t[k].split(";").map((v) => v.trim()).filter((v) => v && v !== t.name);
-    if (kept.length) t[k] = kept.join(";");
-    else delete t[k];
+    setList(t, k, splitTag(t[k]).filter((v) => v !== t.name));
   }
   if (road && !t.railway) t.highway ??= way ? "platform" : "bus_stop";
   return t;
@@ -72,7 +67,7 @@ function platformsOfStops(routes, kinds) {
       if (kind !== "stop") return;
       const [next, previous] = [stops[i + 1], stops[i - 1]];
       const platform = next?.[1] === "platform" ? next[0] : previous?.[1] === "platform" ? previous[0] : null;
-      if (platform) out.set(ref, new Set([...(out.get(ref) ?? []), platform]));
+      if (platform) setIn(out, ref).add(platform);
     });
   }
   return out;
@@ -81,10 +76,10 @@ function platformsOfStops(routes, kinds) {
 /** {name, official_name, places} of each stop, by key. A long network takes a while: Nominatim is asked at most once per second. */
 async function nameAll(objects, lang, onProgress) {
   const seen = new Map(), out = new Map();
-  const entries = [...objects].filter(([, o]) => o.tags.name && positionOf(o));
+  const entries = [...objects].filter(([, o]) => o.tags.name && osmPosition(o));
   for (const [i, [key, o]] of entries.entries()) {
     onProgress(`Towns of the stops (Nominatim): ${i + 1} of ${entries.length}…`);
-    const name = cleanStopName(o.tags.name), pos = positionOf(o);
+    const name = cleanStopName(o.tags.name), pos = osmPosition(o);
     const official = o.tags.official_name && stopKey(cleanStopName(o.tags.official_name)) === stopKey(name) ? cleanStopName(o.tags.official_name) : null;
     const nearby = seen.get(stopKey(name)) ?? [];
     let found = nearby.find((p) => dist(p.pos, pos) <= SAME_PLACE_M);
@@ -120,7 +115,7 @@ export async function runNetworkFix(feed, { network, onProgress = () => {} }) {
   const wanted = new Set([nameKey(network), ...(osmName ? [nameKey(osmName)] : [])]);
   const ofNetwork = (tags) => networksOf(tags).some((n) => wanted.has(n));
   const routes = Object.entries(relations).filter(([, o]) => o.tags.route && ofNetwork(o.tags));
-  if (!routes.length) throw new Error(`No route relation of "${[...new Set([network, osmName].filter(Boolean))].join('" or "')}" in OSM here: nothing to correct.`);
+  if (!routes.length) throw new Error(`No route relation of "${unique([network, osmName].filter(Boolean)).join('" or "')}" in OSM here: nothing to correct.`);
 
   const roles = new Map(), roadStops = new Set(), vehicles = new Map();
   for (const [, { tags, members }] of routes) {
@@ -128,7 +123,7 @@ export async function runNetworkFix(feed, { network, onProgress = () => {} }) {
       if (ref[0] === "r" || !/^(?:platform|stop)/.test(role)) continue;
       if (!roles.has(ref)) roles.set(ref, { stop: false, platform: false });
       roles.get(ref)[role.startsWith("stop") ? "stop" : "platform"] = true;
-      if (!vehicles.has(ref)) vehicles.set(ref, new Set());
+      setIn(vehicles, ref);
       if (tags.route in VEHICLE) {
         roadStops.add(ref);
         vehicles.get(ref).add(VEHICLE[tags.route]);
@@ -173,7 +168,7 @@ export async function runNetworkFix(feed, { network, onProgress = () => {} }) {
     corrected.set(key, tags);
     const own = platformsOf.get(key) ?? new Set();
     for (const p of own) if (corrected.has(p)) takeFromStopPosition(corrected.get(p), moved, own.size === 1);
-    const lost = Object.keys(moved).filter((k) => !own.size);
+    const lost = own.size ? [] : Object.keys(moved);
     if (lost.length) log.warn(`${key}: stop_position without a platform in its relations, ${lost.join(", ")} dropped (to check)`);
   }
   let nStops = 0, nKinds = 0;
@@ -208,13 +203,13 @@ export async function runNetworkFix(feed, { network, onProgress = () => {} }) {
     obj.update(key, relations[key], { ...o, tags });
     return true;
   };
-  const stopOf = (member) => names.get(member);
   const endpoints = new Map();
   let nRoutes = 0;
   const skipped = [], trips = [];
   for (const [key, o] of routes) {
-    const ordered = (role) => o.members.filter(([ref, r]) => r.startsWith(role) && stopOf(ref)).map(([ref]) => stopOf(ref));
-    const members = ordered("platform").length >= 2 ? ordered("platform") : ordered("stop");
+    const ordered = (role) => o.members.filter(([ref, r]) => r.startsWith(role) && names.has(ref)).map(([ref]) => names.get(ref));
+    const platforms = ordered("platform");
+    const members = platforms.length >= 2 ? platforms : ordered("stop");
     if (members.length < 2) {
       skipped.push(key);
       continue;
@@ -234,7 +229,7 @@ export async function runNetworkFix(feed, { network, onProgress = () => {} }) {
       const labels = chosen ? chosen[k] : vias.map((v) => stopLabel(members.find((s) => s.name === v) ?? { name: v }));
       const { via, ...others } = o.tags;
       const hasVia = chosen ? vias.length > 0 : via !== undefined;
-      const tags = { ...others, name: tripTitle(prefix, o.tags.ref, from, to, labels), from: members[0].name, to: members.at(-1).name, ...(hasVia ? { via: [...new Set(vias)].join(";") } : {}) };
+      const tags = { ...others, name: tripTitle(prefix, o.tags.ref, from, to, labels), from: members[0].name, to: members.at(-1).name, ...(hasVia ? { via: unique(vias).join(";") } : {}) };
       if (set(key, o, tags)) nRoutes++;
     });
   }

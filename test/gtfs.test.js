@@ -112,3 +112,29 @@ test("multi-byte characters split across chunks are kept", async () => {
   assert.equal(routes.length, 20000);
   assert.ok(routes.every((r) => r.route_long_name === "Hôpital Général é"));
 });
+
+test("rows left out without parsing: what is read does not change, quotes and spaces included", async () => {
+  const feed = await Feed.open(makeZip({
+    "agency.txt": "agency_id,agency_name\nA,A\n",
+    "routes.txt": "route_id,agency_id,route_short_name,route_type\nR,A,1,3\n",
+    "trips.txt": "route_id,service_id,trip_id,shape_id\nR,S,t1,s1\nR,S,t2,s2\n",
+    "stops.txt": "stop_id,stop_name,stop_lat,stop_lon\nX,X,49,1\nY,Y,49,1\nZ,Z,49,1\n",
+    "stop_times.txt": 'trip_id,stop_id,stop_sequence\nt1,X,1\n"t1",Y,2\n t1,Z,3\nt2,X,1\n"t2",Y,2\n',
+    "shapes.txt": 'shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\ns1,49,1,2\n"s1",48,1,1\ns2,47,1,1\n',
+  }));
+  await feed.stopAgencies(); // the first pass needs every row
+  assert.deepEqual((await feed.stopTimes(["t1"])).map((s) => [s.trip_id, s.stop_id]), [["t1", "X"], ["t1", "Y"], ["t1", "Z"]]);
+  assert.deepEqual(await feed.shapes(["s1"]), new Map([["s1", [[48, 1], [49, 1]]]]));
+});
+
+test("the trip_id in another column than the first: the same rows", async () => {
+  const feed = await Feed.open(makeZip({
+    "agency.txt": "agency_id,agency_name\nA,A\n",
+    "routes.txt": "route_id,agency_id,route_short_name,route_type\nR,A,1,3\n",
+    "trips.txt": "route_id,service_id,trip_id\nR,S,t1\nR,S,t2\n",
+    "stops.txt": "stop_id,stop_name,stop_lat,stop_lon\nX,X,49,1\nY,Y,49,1\n",
+    "stop_times.txt": "stop_sequence,stop_id,trip_id\n1,X,t1\n1,Y,t2\n",
+  }));
+  await feed.stopAgencies();
+  assert.deepEqual((await feed.stopTimes(["t2"])).map((s) => s.stop_id), ["Y"]);
+});

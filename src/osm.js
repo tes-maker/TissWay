@@ -7,9 +7,9 @@
 // Objects created by the tool have a negative id ("n-12") and no version.
 
 import { overpass } from "./net.js";
-import { CODE_IN_ID } from "./platforms.js";
+import { CODE_IN_ID, NETWORK_KEYS, numberedNetworks, refKeyFor } from "./platforms.js";
 import { settings } from "./settings.js";
-import { sameTags } from "./util.js";
+import { sameTags, setList, splitTag, unique } from "./util.js";
 
 const MEMBER_TYPES = { n: "node", w: "way", r: "relation" };
 const KIND = { node: "n", way: "w", relation: "r" };
@@ -76,7 +76,7 @@ export function cleanGtfsIds(tags) {
     const cleaned = ids.map(cleanGtfsId);
     if (cleaned.every((id, i) => id === ids[i])) continue;
     if (out === tags) out = { ...tags };
-    out[k] = [...new Set(cleaned)].join(";");
+    out[k] = unique(cleaned).join(";");
   }
   return out;
 }
@@ -121,7 +121,7 @@ export async function readObjects(keys) {
 
 /** Those of these nodes that are on a road: a highway=* other than for people on foot. */
 export async function onRoad(keys) {
-  const ways = await inBatches(numericIds(keys, "n"), (ids) => `node(id:${ids});way(bn)[highway];out meta;`);
+  const ways = await inBatches(numericIds(keys, "n"), (ids) => `node(id:${ids});way(bn)[highway];out body;`);
   const road = Object.values(ways).filter((w) => w.nodes && !NOT_ROADS.has(w.tags.highway));
   const wanted = new Set(keys);
   return new Set(road.flatMap((w) => w.nodes).filter((n) => wanted.has(n)));
@@ -129,7 +129,7 @@ export async function onRoad(keys) {
 
 /** Every relation with one of these nodes or ways as a member, whatever its mode, and their route_masters. */
 export async function relationsOfStops(keys) {
-  const read = (kind, member, type) => inBatches(numericIds(keys, kind), (ids) => `${type}(id:${ids});relation(${member})->.r;.r out meta;relation(br.r)[route_master]->.m;.m out meta;`);
+  const read = (kind, member, type) => inBatches(numericIds(keys, kind), (ids) => `${type}(id:${ids});relation(${member})->.r;.r out body;relation(br.r)[route_master]->.m;.m out body;`);
   return { ...(await read("n", "bn", "node")), ...(await read("w", "bw", "way")) };
 }
 
@@ -179,8 +179,7 @@ const unescapeXml = (s) => s.replace(/&(#x?[0-9a-fA-F]+|amp|lt|gt|quot|apos);/g,
   return String.fromCodePoint(e[1] === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1)));
 });
 
-const tagValues = (...values) => [...new Set(values.flatMap((v) => (v || "").split(";").map((x) => x.trim()).filter(Boolean)))];
-const networkSuffix = (network) => network.trim().replace(/\s+/g, "_").replace(/[^\p{L}\p{N}_.-]/gu, "");
+const tagValues = (...values) => unique(values.flatMap((v) => splitTag(v)));
 
 /** The ref tags of a platform, whatever the names of its networks (ref:Nomad can be the ref of Nomad Car): bases are the tags holding a stop id without suffix
  * (ref:FR:Atoumod when ref:FR:Atoumod:Nomad exists), suffixed the tags of the other networks. */
@@ -213,17 +212,17 @@ function exportedStopIds(t) {
 /** Compact network and GTFS stop ids on exported platforms, without changing the in-memory tags used during processing. */
 function outputPlatformTags(tags) {
   const out = { ...tags };
-  const numberedNetworks = Object.keys(out).filter((k) => /^network:\d+$/.test(k)).sort((a, b) => Number(a.slice(8)) - Number(b.slice(8)));
-  const networks = tagValues(out.network, ...numberedNetworks.map((k) => out[k]));
+  const numberedKeys = numberedNetworks(out);
+  const networks = tagValues(out.network, ...numberedKeys.map((k) => out[k]));
 
-  if (numberedNetworks.length) {
+  if (numberedKeys.length) {
     out.network = networks.join(";");
-    numberedNetworks.forEach((k) => delete out[k]);
+    numberedKeys.forEach((k) => delete out[k]);
   }
 
-  for (const key of ["network:wikidata", "network:wikipedia", "operator"]) {
+  for (const key of NETWORK_KEYS.slice(1)) {
     const numbered = Object.keys(out).filter((k) => k.startsWith(`${key}:`) && /^\d+$/.test(k.slice(key.length + 1)));
-    const named = networks.slice(1).map((network) => `${key}:${networkSuffix(network)}`).filter((k) => k in out);
+    const named = networks.slice(1).map((network) => refKeyFor(key, network)).filter((k) => k in out);
     const values = tagValues(out[key], ...numbered.sort((a, b) => Number(a.slice(key.length + 1)) - Number(b.slice(key.length + 1))).map((k) => out[k]),
       ...named.map((k) => out[k]));
     if (values.length) out[key] = values.join(";");
@@ -241,15 +240,13 @@ function outputPlatformTags(tags) {
  * has them, on any object: no gtfs:stop_code:<feed>:<network>, gtfs:stop_code:<network> or numbered key, and no gtfs:stop_code[:<feed>] value that is a ref of the platform. */
 function withoutSecondaryStopCodes(tags) {
   const out = { ...tags };
-  const networks = tagValues(tags.network, ...Object.keys(tags).filter((k) => /^network:\d+$/.test(k)).map((k) => tags[k])).slice(1).map(networkSuffix);
-  const secondary = (k) => /^gtfs:stop_code:(?:[^:]+:.|\d+$)/.test(k) || networks.some((n) => k === `gtfs:stop_code:${n}`);
+  const networks = tagValues(tags.network, ...Object.keys(tags).filter((k) => /^network:\d+$/.test(k)).map((k) => tags[k])).slice(1);
+  const secondary = (k) => /^gtfs:stop_code:(?:[^:]+:.|\d+$)/.test(k) || networks.some((n) => k === refKeyFor("gtfs:stop_code", n));
   const codes = Object.keys(out).filter((k) => k.startsWith("gtfs:stop_code"));
   for (const k of codes.filter(secondary)) delete out[k];
   const refs = new Set(tagValues(tags.ref, ...refTags(tags).suffixed.map((k) => tags[k])));
   for (const k of codes.filter((c) => c in out)) {
-    const kept = tagValues(out[k]).filter((v) => !refs.has(v));
-    if (kept.length) out[k] = kept.join(";");
-    else delete out[k];
+    setList(out, k, tagValues(out[k]).filter((v) => !refs.has(v)));
   }
   return out;
 }

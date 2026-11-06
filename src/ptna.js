@@ -72,13 +72,11 @@ const ptnaType = (routeType, fallback = "bus") => osmRoute(routeType) || fallbac
 
 /** Map network name -> its GTFS routes, with network and operator (agencies with the same network tag merged). */
 export async function loadNetworks(feed) {
-  const agency = await feed.agency();
-  const networks = agencyNetworks(agency);
-  const names = new Map(agency.map((a) => [a.agency_id, a.agency_name]));
+  const networks = agencyNetworks(await feed.agency());
   const out = new Map();
   for (const r of await feed.routes()) {
     const network = networks[r.agency_id]?.network ?? (r.agency_id || "GTFS");
-    listIn(out, network).push({ ...r, network, operator: "", agency_name: names.get(r.agency_id) ?? "" });
+    listIn(out, network).push({ ...r, operator: "" });
   }
   return out;
 }
@@ -310,7 +308,7 @@ export async function buildList(feed, network, { inputLines = null, title = null
     settings.feed = await feedCodeOf(feed);
     if (!settings.feed) log.warn("No GTFS feed code found in OSM for this feed: the gtfs-feed field stays empty. Set its code from the OSM wiki's List of GTFS feeds in Settings.");
   }
-  const final = routes.map((r) => ({ ...r, operator: operator || r.operator, label: withLongName(labels.get(r.route_id) ?? null, r.route_long_name) }));
+  const final = routes.map((r) => ({ ...r, operator: operator || "", label: withLongName(labels.get(r.route_id) ?? null, r.route_long_name) }));
   if (inputLines) return update(inputLines, final, network, refGtfs, Boolean(operator));
   return generate(title || network, network, final);
 }

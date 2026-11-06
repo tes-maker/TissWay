@@ -11,6 +11,17 @@ export const log = {
 export const listIn = (map, key) => map.get(key) ?? map.set(key, []).get(key);
 export const setIn = (map, key) => map.get(key) ?? map.set(key, new Set()).get(key);
 
+/** The values of a tag "a; b", without the empty ones. */
+export const splitTag = (value) => (value ?? "").split(";").map((v) => v.trim()).filter(Boolean);
+
+/** Write a list in a tag, or take the tag away when it is empty. */
+export function setList(tags, key, values) {
+  if (values.length) tags[key] = values.join(";");
+  else delete tags[key];
+}
+
+export const capitalized = (s) => s[0].toUpperCase() + s.slice(1);
+
 /** Lexicographic comparison of numbers, strings or arrays of them. */
 export function compare(a, b) {
   if (Array.isArray(a)) {
@@ -64,3 +75,6 @@ export function sameTags(a, b) {
   const keys = Object.keys(a);
   return keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k]);
 }
+
+/** A summary as a line: {stops: 12, "Platforms changed": "2 of 3"} -> "12 stops · Platforms changed: 2 of 3". A number goes before its word, singular for 1; a text follows its label. */
+export const summaryText = (summary) => Object.entries(summary).map(([k, v]) => (typeof v === "string" ? `${k}: ${v}` : `${v} ${v === 1 ? k.replace(/s$/, "") : k}`)).join(" · ");

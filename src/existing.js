@@ -15,13 +15,13 @@
 // so that platforms and relations all carry them.
 
 import { activeFeed, settings } from "./settings.js";
-import { listIn } from "./util.js";
+import { listIn, splitTag } from "./util.js";
 
 /** gtfs:* tag key, suffixed with the feed id when there is one ("gtfs:route_id:DE-BY-MVV"). */
 export const feedKey = (key) => (activeFeed() ? `${key}:${activeFeed()}` : key);
 
 const values = (tags, prefix) => new Set(Object.entries(tags).filter(([k]) => k.startsWith(prefix))
-  .flatMap(([, v]) => v.split(";").map((x) => x.trim()).filter(Boolean)));
+  .flatMap(([, v]) => splitTag(v)));
 
 const norm = (value) => (value || "").trim().split(/\s+/).join(" ").toLowerCase();
 
@@ -63,9 +63,8 @@ export function similarity(members, tags, existing) {
   const refs = new Set([...values(theirs, "gtfs:shape_id"), ...values(theirs, "gtfs:trip_id"), ...values(theirs, "ref_trips")]);
   const ours = [tags[feedKey("gtfs:shape_id")], tags[feedKey("gtfs:trip_id:sample")]].filter(Boolean).flatMap((v) => v.split(";"));
   if (ours.some((x) => refs.has(x))) return 1;
-  let kind = ["platform"];
-  if (!memberRefs(members, kind).length || !memberRefs(existing.members, kind).length) kind = ["stop"];
-  const stopsA = memberRefs(members, kind), stopsB = memberRefs(existing.members, kind);
+  let stopsA = memberRefs(members, ["platform"]), stopsB = memberRefs(existing.members, ["platform"]);
+  if (!stopsA.length || !stopsB.length) [stopsA, stopsB] = [memberRefs(members, ["stop"]), memberRefs(existing.members, ["stop"])];
   const waysA = memberRefs(members, [""]), waysB = memberRefs(existing.members, [""]);
   const setB = new Set(stopsB);
   const shared = new Set(stopsA.filter((s) => setB.has(s))).size;
