@@ -147,7 +147,7 @@ button.red:hover:not(:disabled) { background: var(--error); filter: brightness(.
 
 /* options */
 .options, .panel { display: grid; gap: 14px; }
-.formats { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.formats { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .formats legend { font-size: .9rem; font-weight: 700; padding: 0; margin-bottom: 6px; }
 .formats label { cursor: pointer; }
 .formats input { position: absolute; opacity: 0; width: 1px; height: 1px; }
@@ -252,6 +252,7 @@ textarea.secret.shown { -webkit-text-security: none; }
   .drop { padding: 24px 12px; }
   .id-row { flex-wrap: wrap; }
   .id-row button { flex: 1 1 100%; }
+  .formats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .formats b { font-size: .84rem; }
   .how { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .setting { grid-template-columns: minmax(0, 1fr); }

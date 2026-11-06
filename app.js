@@ -8,6 +8,7 @@ import { clearCaches, downloadGtfs, feedUrls, services } from "./src/net.js";
 import { runRoutes } from "./src/pipeline.js";
 import { writeOsm } from "./src/osm.js";
 import { runNetworkFix } from "./src/network_fix.js";
+import { runOperatorEdit } from "./src/operator_edit.js";
 import { runPlatforms } from "./src/platform_tags.js";
 import { applyPriority, closeNetworks, keepNetworkApart, listRefs, mergeNetworks, priorityRows, removeRef, restoreRef, sharedPlatforms } from "./src/ref_review.js";
 import { buildList, loadNetworks, refKey } from "./src/ptna.js";
@@ -434,6 +435,21 @@ function showLines() {
 
 const checkedLine = () => networkRoutes().find((r) => r.route_id === state.line);
 const format = () => document.querySelector("[name=format]:checked").value;
+const operatorTargets = () => ({ routes: $("operator-routes").checked, platforms: $("operator-platforms").checked, stops: $("operator-stops").checked });
+
+/** What the button says for the Operator format, and whether it can do it yet. */
+function operatorLabel(line) {
+  const operator = $("operator-value").value.trim(), action = $("operator-action").value, next = $("operator-new").value.trim();
+  $("operator-new-box").hidden = action !== "change";
+  $("operator-value-label").textContent = action === "change" ? "Current operator" : "Operator";
+  if (!line) return { text: "Turn on a line", ready: false };
+  if (!operator) return { text: "Enter an operator", ready: false };
+  if (action === "change" && !next) return { text: "Enter the new operator", ready: false };
+  if (!Object.values(operatorTargets()).some(Boolean)) return { text: "Choose what to change", ready: false };
+  const name = line.route_short_name || line.route_long_name;
+  const text = { add: `Add ${operator} to line ${name}`, remove: `Remove ${operator} from line ${name}`, change: `Change ${operator} to ${next} on line ${name}` };
+  return { text: text[action], ready: true };
+}
 
 /** The label of the big button says what it will do, and why it cannot yet. */
 function refreshConvert() {
@@ -448,9 +464,10 @@ function refreshConvert() {
     routes: line ? `Convert line ${line.route_short_name || line.route_long_name} to .osm` : "Turn on a line",
     platforms: "Convert the platforms to .osm",
     ptna: "Create the PTNA list",
+    operator: operatorLabel(line).text,
   };
   button.textContent = labels[format()];
-  button.disabled = !$("network").value || (format() === "routes" && !line);
+  button.disabled = !$("network").value || (format() === "routes" && !line) || (format() === "operator" && !operatorLabel(line).ready);
 }
 
 // --- exports ----------------------------------------------------------------------------------------------
@@ -495,6 +512,15 @@ async function exportPtna() {
   if (!report.length) log.info("  no change");
   const text = `${lines.join("\n")}\n`;
   showResult({ files: [{ name: `ptna_${slug($("ptna-title").value.trim() || network)}.txt`, text, type: "text/plain" }], preview: text, summary: { lines: networks.get(network).length }, warningsBefore });
+}
+
+async function exportOperator() {
+  const network = selectedNetwork();
+  const line = checkedLine();
+  if (!line) throw new Error("Turn on a line.");
+  const warningsBefore = state.warnings;
+  const { xml, filename, summary } = await runOperatorEdit(state.feed, { network, routeId: line.route_id, operator: $("operator-value").value, newOperator: $("operator-new").value, action: $("operator-action").value, targets: operatorTargets(), onProgress: progress });
+  showResult({ files: [{ name: filename, text: xml, type: OSM_TYPE }], summary, warningsBefore });
 }
 
 function openFix() {
@@ -550,7 +576,7 @@ function showSettingsCount() {
   $("settings-count").hidden = !modifiedCount();
 }
 
-const EXPORTS = { routes: exportRoutes, platforms: exportPlatforms, ptna: exportPtna };
+const EXPORTS = { routes: exportRoutes, platforms: exportPlatforms, ptna: exportPtna, operator: exportOperator };
 
 function convert() {
   hideResult();
@@ -610,10 +636,13 @@ function wire() {
   for (const radio of document.querySelectorAll("[name=format]")) {
     radio.addEventListener("change", () => {
       hideResult();
-      for (const p of document.querySelectorAll("[data-panel]")) p.hidden = p.dataset.panel !== format();
+      for (const p of document.querySelectorAll("[data-panel]")) p.hidden = !p.dataset.panel.split(" ").includes(format());
       refreshConvert();
     });
   }
+
+  for (const id of ["operator-value", "operator-new"]) $(id).addEventListener("input", refreshConvert);
+  for (const id of ["operator-action", "operator-routes", "operator-platforms", "operator-stops"]) $(id).addEventListener("change", refreshConvert);
 
   $("fix-open").addEventListener("click", openFix);
   $("fix-dialog").addEventListener("close", closeFix);

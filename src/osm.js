@@ -82,12 +82,12 @@ export function cleanGtfsIds(tags) {
 }
 
 /** The objects of an Overpass answer, their GTFS ids corrected as soon as they are read, so that they compare with the feed. Such an object has
- * correctedIds set: it has to go in the file even when nothing else changes on it. */
+ * correctedIds set: it has to go in the file even when nothing else changes on it. Its osmTags are the tags as mapped. */
 export function fromOverpass(elements) {
   const out = {};
   for (const e of elements) {
     const tags = cleanGtfsIds(e.tags || {});
-    const o = { version: String(e.version ?? ""), tags, ...(tags !== e.tags && e.tags ? { correctedIds: true } : {}) };
+    const o = { version: String(e.version ?? ""), tags, ...(tags !== e.tags && e.tags ? { correctedIds: true, osmTags: e.tags } : {}) };
     if (e.type === "node") Object.assign(o, { lat: e.lat, lon: e.lon });
     if (e.type === "way") o.nodes = (e.nodes || []).map((n) => `n${n}`);
     if (e.type === "relation") o.members = (e.members || []).map((m) => [`${KIND[m.type]}${m.ref}`, m.role || ""]);
@@ -125,6 +125,12 @@ export async function onRoad(keys) {
   const road = Object.values(ways).filter((w) => w.nodes && !NOT_ROADS.has(w.tags.highway));
   const wanted = new Set(keys);
   return new Set(road.flatMap((w) => w.nodes).filter((n) => wanted.has(n)));
+}
+
+/** Every relation with one of these nodes or ways as a member, whatever its mode, and their route_masters. */
+export async function relationsOfStops(keys) {
+  const read = (kind, member, type) => inBatches(numericIds(keys, kind), (ids) => `${type}(id:${ids});relation(${member})->.r;.r out meta;relation(br.r)[route_master]->.m;.m out meta;`);
+  return { ...(await read("n", "bn", "node")), ...(await read("w", "bw", "way")) };
 }
 
 /** Relations containing these ways. */
@@ -262,8 +268,9 @@ export function differsFromOsm(o, original) {
 /** Does this file change anything in OSM? */
 export const changesOsm = (obj) => [...obj.modified].some(([key, o]) => differsFromOsm(o, obj.original(key)));
 
-/** Modified objects (and the nodes of their ways) as a JOSM .osm file. Only what differs from OSM is marked action="modify", the only objects JOSM uploads. */
-export function writeOsm(obj) {
+/** Modified objects (and the nodes of their ways) as a JOSM .osm file. Only what differs from OSM is marked action="modify", the only objects JOSM uploads.
+ * asIs: the tags are written exactly as they are in obj, without the form of a file, and every modified object is marked. */
+export function writeOsm(obj, { asIs = false } = {}) {
   const keys = new Set(obj.modified.keys());
   for (const [key, o] of obj.modified) if (key[0] === "w") for (const n of o.nodes) keys.add(n);
   const order = (k) => "nwr".indexOf(k[0]);
@@ -272,10 +279,10 @@ export function writeOsm(obj) {
   const lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<osm version="0.6" generator="tissway" upload="true">'];
   for (const key of sorted) {
     const o = obj.get(key);
-    const tags = outputTags(o.tags);
+    const tags = asIs ? o.tags : outputTags(o.tags);
     let attrs = `id="${key.slice(1)}"`;
     if (o.version) attrs += ` version="${o.version}"`;
-    if (differsFromOsm(o, obj.original(key))) attrs += ' action="modify"'; // also a node of a way whose tags change here: it has to be uploaded too
+    if (asIs ? obj.modified.has(key) : differsFromOsm(o, obj.original(key))) attrs += ' action="modify"'; // also a node of a way whose tags change here: it has to be uploaded too
     if (key[0] === "n") attrs += ` lat="${o.lat.toFixed(7)}" lon="${o.lon.toFixed(7)}"`;
     const body = [];
     for (const n of o.nodes || []) body.push(`    <nd ref="${n.slice(1)}" />`);
