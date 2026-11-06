@@ -216,7 +216,7 @@ const SEGMENT = [[49.0, 1.0], [49.001, 1.0]]; // northbound: kerb side = east
 test("fixSide takes the sibling on the kerb side", () => {
   const s = makeStops([gtfsStop("A", "10A", 49.0005, WEST), gtfsStop("B", "10B", 49.0005, EAST)], {
     neighbours: { A: ["B"], B: ["A"] },
-    platforms: { A: [{ id: "nPA", pos: [49.0005, WEST], name: "Hopital", holder: false }], B: [{ id: "nPB", pos: [49.0005, EAST], name: "Hopital", holder: false }] },
+    platforms: { A: [{ id: "nPA", pos: [49.0005, WEST], name: "Hopital", holder: false, sameName: true }], B: [{ id: "nPB", pos: [49.0005, EAST], name: "Hopital", holder: false, sameName: true }] },
   });
   const [platform, dataId] = fixSide("A", s.platforms.get("A")[0], SEGMENT, s);
   assert.deepEqual([platform.id, dataId], ["nPB", "B"]);
@@ -274,15 +274,15 @@ test("fixSide without sibling changes nothing", () => {
 });
 
 test("far platform only on the kerb side next to the road", () => {
-  const far = (id, lon) => ({ id, pos: [49.0005, lon], name: "X", holder: false, far: true });
-  const nearWest = { id: "nW", pos: [49.0005, WEST], name: "X", holder: false, far: false };
+  const far = (id, lon) => ({ id, pos: [49.0005, lon], name: "X", holder: false, sameName: true, far: true });
+  const nearWest = { id: "nW", pos: [49.0005, WEST], name: "X", holder: false, sameName: true, far: false };
   const stop = [49.0005, 1.0];
   assert.equal(choosePlatform([far("nE", EAST)], stop, { segment: SEGMENT }).id, "nE");
   assert.equal(choosePlatform([far("nW2", WEST)], stop, { segment: SEGMENT }), null); // across the road
   assert.equal(choosePlatform([far("nP", 1.0005)], stop, { segment: SEGMENT }), null); // 37 m off: parallel street
   assert.equal(choosePlatform([far("nE", EAST)], stop), null); // side unknown
   assert.equal(choosePlatform([far("nE", EAST)], stop, { segment: SEGMENT, road: () => 32 }), null); // street the route does not take
-  assert.equal(choosePlatform([nearWest, far("nW2", WEST)], stop, { segment: SEGMENT }).id, "nW"); // a near one is still the fallback
+  assert.equal(choosePlatform([nearWest, far("nW2", WEST)], stop, { segment: SEGMENT }), null); // never across the road: see fixSide, for a single pole
 });
 
 test("roadDistance stops at the end of the travelled ways", () => {
@@ -322,7 +322,7 @@ test("platform between the road and a lay-by is judged on the road", () => {
 });
 
 test("left-hand traffic: platform on the left", () => {
-  const candidates = [{ id: "nW", pos: [49.0005, WEST], name: "X", holder: false }, { id: "nE", pos: [49.0005, EAST], name: "X", holder: false }];
+  const candidates = [{ id: "nW", pos: [49.0005, WEST], name: "X", holder: false, sameName: true }, { id: "nE", pos: [49.0005, EAST], name: "X", holder: false, sameName: true }];
   settings.driving_side = "left";
   assert.equal(choosePlatform(candidates, [49.0005, 1.0], { segment: SEGMENT }).id, "nW");
   settings.driving_side = "right";
@@ -573,7 +573,7 @@ test("the settings can name the owner, whatever the sizes", () => {
 
 test("stop served both ways without direction_id gets a platform per side", () => {
   const obj = street({ nE: node(49.0005, EAST, { name: "Milieu" }), nW: node(49.0005, WEST, { name: "Milieu" }) });
-  const candidate = (id, lon) => ({ id, pos: [49.0005, lon], name: "Milieu", holder: false });
+  const candidate = (id, lon) => ({ id, pos: [49.0005, lon], name: "Milieu", holder: false, sameName: true });
   const stops = makeStops([gtfsStop("S", "", 48.9997, 1.0, "Sud"), gtfsStop("M", "", 49.0005, 1.00001, "Milieu"), gtfsStop("N", "", 49.0013, 1.0, "Nord")],
     { platforms: { S: [], N: [], M: [candidate("nE", EAST), candidate("nW", WEST)] } });
   const [[rn, rs]] = build([variant("0", ["S", "M", "N"], "t1", ["wS", "wR", "wN"]), variant("0", ["N", "M", "S"], "t2", ["wN", "wR", "wS"])], stops, obj);
@@ -638,7 +638,7 @@ test("stop_refs_from_gtfs off: the codes of the GTFS are not written, the ref of
 test("choosePlatform: its stop_id, then its ref, then the nearest; the kerb side first", () => {
   const stop = [49.0005, EAST];
   const at = (id, lat, lon, more = {}) => ({ id, pos: [lat, lon], name: id, holder: false, byRef: false, far: false, ...more });
-  const near = at("near", 49.0005, EAST), byRef = at("byRef", 49.0007, EAST, { byRef: true }), holder = at("holder", 49.0008, EAST, { holder: true });
+  const near = at("near", 49.0005, EAST, { sameName: true }), byRef = at("byRef", 49.0007, EAST, { byRef: true }), holder = at("holder", 49.0008, EAST, { holder: true });
   assert.equal(choosePlatform([near, byRef], stop, { segment: SEGMENT }).id, "byRef");
   assert.equal(choosePlatform([near, byRef, holder], stop, { segment: SEGMENT }).id, "holder");
   assert.equal(choosePlatform([near, at("across", 49.0005, WEST, { byRef: true })], stop, { segment: SEGMENT }).id, "near");
@@ -651,4 +651,58 @@ test("fixSide: a platform with the ref of this stop only stays its own, even clo
   assert.equal(fixSide("A", platform, SEGMENT, stopsWith({ A: ["nP"] }))[1], "A");
   assert.equal(fixSide("A", platform, SEGMENT, stopsWith({ A: ["nP"], B: ["nP"] }))[1], "B"); // both: nothing told apart, the nearest
   assert.equal(fixSide("A", { ...platform, byRef: false }, SEGMENT, stopsWith({ B: ["nP"] }))[1], "B");
+});
+
+test("the order of choosePlatform: its ref, its name, then a very close platform nobody else has", () => {
+  const stop = [49.0005, EAST];
+  const at = (id, lat, lon, more = {}) => ({ id, pos: [lat, lon], name: id, holder: false, byRef: false, sameName: false, claimed: false, far: false, ...more });
+  const close = at("close", 49.00055, EAST); // 6 m, another name
+  const named = at("named", 49.0007, EAST, { sameName: true }); // 22 m
+  const choose = (...candidates) => choosePlatform(candidates, stop, { segment: SEGMENT })?.id ?? null;
+  assert.equal(choose(close, named), "named");
+  assert.equal(choose(close), "close");
+  assert.equal(choose({ ...close, name: null }), "close");
+  assert.equal(choose({ ...close, claimed: true }), null); // the ref or the name of another stop: a new platform
+  assert.equal(choose(at("further", 49.0007, EAST)), null); // 22 m, another name
+  settings.thresholds.platform_unclaimed_m = 25;
+  assert.equal(choose(at("further", 49.0007, EAST)), "further");
+  settings.thresholds.platform_unclaimed_m = 0;
+  assert.equal(choose(close), null);
+});
+
+test("fixSide: the platform with the ref across the road gives the stop opposite, even when the GTFS position is on the kerb side", () => {
+  const across = { id: "nW", pos: [49.0005, WEST], name: "H", holder: false, byRef: true };
+  const kerbOfB = { id: "nE", pos: [49.0005, EAST], name: "H", holder: false, byRef: true };
+  const s = makeStops([gtfsStop("A", "10A", 49.0005, EAST), gtfsStop("B", "10B", 49.0005, WEST)], { neighbours: { A: ["B"], B: ["A"] }, rivals: { A: ["B"], B: ["A"] }, platforms: { A: [across], B: [kerbOfB] } });
+  assert.deepEqual(fixSide("A", null, SEGMENT, s).map((x) => x?.id ?? x), ["nE", "B"]);
+});
+
+test("fixSide: a single pole across the road, only with no stop on the other side", () => {
+  const pole = { id: "nW", pos: [49.0005, WEST], name: "H", holder: false, sameName: true, far: false };
+  const stopsWith = (more = {}) => makeStops([gtfsStop("A", "", 49.0005, EAST), gtfsStop("T", "", 49.0005, WEST)], { platforms: { A: [pole], T: [] }, ...more });
+  assert.equal(fixSide("A", null, SEGMENT, stopsWith())[0].id, "nW");
+  assert.equal(fixSide("A", null, SEGMENT, stopsWith({ rivals: { A: ["T"], T: ["A"] } }))[0], null); // it is the one of the stop opposite: a new platform
+  const other = { ...pole, sameName: false };
+  assert.equal(fixSide("A", null, SEGMENT, makeStops([gtfsStop("A", "", 49.0005, EAST)], { platforms: { A: [other] } }))[0], null); // nothing says it is this stop
+  assert.equal(fixSide("A", null, SEGMENT, makeStops([gtfsStop("A", "", 49.0005, EAST)], { platforms: { A: [{ ...pole, far: true }] } }))[0], null); // too far to be a pole
+});
+
+test("a platform taken with neither the ref nor the name of the stop is reported, one with them is not", () => {
+  const candidate = (more) => ({ id: "nE", pos: [49.0005, EAST], name: "Autre", holder: false, byRef: false, sameName: false, claimed: false, far: false, ...more });
+  const warnings = (c) => {
+    const obj = street({ nE: node(49.0005, EAST, { name: "Autre" }) });
+    const stops = makeStops([gtfsStop("S", "", 48.9997, 1.0, "Sud"), gtfsStop("M", "", 49.0005, EAST, "Milieu"), gtfsStop("N", "", 49.0013, 1.0, "Nord")], { platforms: { S: [], N: [], M: [c] } });
+    const seen = [], sink = log.sink;
+    log.sink = (level, message) => { if (level === "warn") seen.push(message); };
+    try {
+      build([variant("0", ["S", "M", "N"], "t1", ["wS", "wR", "wN"])], stops, obj);
+    } finally {
+      log.sink = sink;
+    }
+    return seen.filter((m) => m.includes("rather than duplicated"));
+  };
+  assert.equal(warnings(candidate()).length, 1);
+  assert.match(warnings(candidate())[0], /Milieu \(M\): nE "Autre"/);
+  assert.equal(warnings(candidate({ sameName: true })).length, 0);
+  assert.equal(warnings(candidate({ byRef: true })).length, 0);
 });

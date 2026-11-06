@@ -42,6 +42,7 @@ class LineBuilder {
     this.far = [];
     this.swapped = [];
     this.wrongSide = [];
+    this.unsure = [];
     this.gaps = new Set();
     this.sameNames = [];
   }
@@ -71,6 +72,7 @@ class LineBuilder {
     const [c, dataId] = fixSide(stopId, initial, segment, stops, road, side);
     if (dataId !== stopId) this.swapped.push(`${s.stop_name} (${stopId} -> ${dataId}${c ? "" : ", platform created"})`);
     const d = stops.df.get(dataId);
+    if (c && !c.holder && !c.byRef && !c.sameName) this.unsure.push(`${d.stop_name} (${dataId}): ${c.id}${c.name ? ` "${c.name}"` : ""}`);
     if (!c && !this.created.has(dataId)) {
       this.created.set(dataId, newKey("n"));
       obj.set(this.created.get(dataId), { lat: d.lat, lon: d.lon, tags: {} });
@@ -275,6 +277,8 @@ class LineBuilder {
     if (far.length) log.warn(`  ${far.length} stop_position(s) more than ${settings.thresholds.stop_position_m} m from the GTFS stop (to check): ${far.join(", ")}`);
     for (const x of this.swapped) log.info(`  GTFS stop across the road, data of the opposite stop used: ${x}`);
     if (wrongSide.length) log.warn(`  ${wrongSide.length} platform(s) across the road, no OSM platform or GTFS stop on the kerb side: ${wrongSide.join(", ")}`);
+    const unsure = unique(this.unsure);
+    if (unsure.length) log.warn(`  ${unsure.length} platform(s) taken with neither the ref nor the name of the stop, rather than duplicated (to check): ${unsure.join(", ")}`);
   }
 }
 
