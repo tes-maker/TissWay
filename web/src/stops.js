@@ -33,14 +33,27 @@ export class Stops {
     this.holders = holders; // stop_id -> Set of OSM platforms already carrying it (gtfs:stop_id*, stop_ref_tags)
     this.rivals = rivals; // stop_id -> neighbours + same-name stops nearby
     this.refHolders = refHolders; // stop_id -> Set of OSM platforms within ref_m with its code as a ref
+    this.stations = new Set(); // stop_ids that are bays of a bus station (stations.markStations)
+    this.bays = new Map(); // of these, stop_id -> {platform: candidate, stop: key of its stop_position or null}
   }
 
   /** Positions of the stops a stop_position of this stop is compared with: the OSM platforms of its rivals, other than the one it uses, else their GTFS position. */
   opposites(stopId, platform = null) {
-    return (this.rivals.get(stopId) || []).flatMap((r) => {
+    return this.rivalsOf(stopId).flatMap((r) => {
       const theirs = (this.platforms.get(r) || []).filter((c) => c.id !== platform).map((c) => c.pos);
       return theirs.length ? theirs : [latlon(this.df.get(r))];
     });
+  }
+
+  /** Its rivals, none for a bay of a station: the other bays are not across a road. */
+  rivalsOf(stopId) {
+    return this.stations.has(stopId) ? [] : this.rivals.get(stopId) || [];
+  }
+
+  /** Its candidate platforms, without those of the other bays of its station. */
+  freeBays(stopId) {
+    const others = new Set([...this.bays].filter(([id]) => id !== stopId).map(([, bay]) => bay.platform.id));
+    return (this.platforms.get(stopId) || []).filter((c) => !others.has(c.id));
   }
 
   positions(ids) {

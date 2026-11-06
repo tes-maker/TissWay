@@ -1,13 +1,13 @@
 // Relations of a line: one route relation per variant and a route_master, new or existing ones updated in place.
 
 import { feedKey, joinIds, updatedMaster, updatedRelation } from "./existing.js";
-import { latlon, xy } from "./geo.js";
+import { dist, latlon, xy } from "./geo.js";
 import { masterLabel, modePrefix, routeName, tripTitle } from "./naming.js";
 import { isNew, newKey } from "./osm.js";
 import { linkNode } from "./splitting.js";
 import { VEHICLE, choosePlatform, completeRouteRef, fixSide, kerbSide, locateStop, makeSpot, materialize, onKerb, roadDistance, sideSegment, stopSegment } from "./platforms.js";
 import { settings } from "./settings.js";
-import { counter, dedupe, listIn, log, unique } from "./util.js";
+import { counter, dedupe, listIn, log, setIn, unique } from "./util.js";
 import { chooseVias } from "./via.js";
 
 const HEX_COLOUR = /^#?([0-9A-Fa-f]{6})$/;
@@ -45,13 +45,43 @@ class LineBuilder {
     this.unsure = [];
     this.gaps = new Set();
     this.sameNames = [];
+    this.placed = new Map(); // stop_id -> the stop_positions of this stop, one for all the variants on a road
+  }
+
+  /** Spot at the stop_position of the bay of stopId, when the trace goes there, else null. */
+  baySpot(ways, stopId, start) {
+    const node = this.stops.bays.get(stopId)?.stop;
+    if (!node) return null;
+    for (let i = start; i < ways.length; i++) if (this.obj.get(ways[i]).nodes.includes(node)) return makeSpot(i, latlon(this.obj.get(node)), 0, { node });
+    return null;
+  }
+
+  /** The spot unchanged, or at the stop_position a previous variant has for this stop, rather than a second one next to it. */
+  samePlace(ways, spot, dataId, start) {
+    if (!spot || spot.node) return spot;
+    for (const node of this.placed.get(dataId) || []) {
+      if (dist(latlon(this.obj.get(node)), spot.pos) > settings.thresholds.stop_position_reuse_m) continue;
+      const at = ways.findIndex((w, i) => i >= start && this.obj.get(w).nodes.includes(node));
+      if (at >= 0) return makeSpot(at, latlon(this.obj.get(node)), spot.distance, { node });
+    }
+    return spot;
+  }
+
+  /** [platform or null, stop_id whose data it takes] of a stop: a bay of a station stays itself, whatever the side, with the platform of its bay. */
+  choosePlatformOf(stopId, segment, road, side) {
+    const { stops } = this, s = stops.df.get(stopId), candidates = stops.platforms.get(stopId) || [];
+    if (stops.stations.has(stopId)) {
+      const bay = stops.bays.get(stopId)?.platform;
+      return [(bay && candidates.find((c) => c.id === bay.id)) ?? choosePlatform(stops.freeBays(stopId), latlon(s)), stopId];
+    }
+    return fixSide(stopId, choosePlatform(candidates, latlon(s), { segment, spotPos: this.spotPos, road, side }), segment, stops, road, side);
   }
 
   /** Spot of the stop_position of stopId (at pos, default: the GTFS position) from ways[start]; beyond stop_position_m, at
    * the nearest point of the way (reported). */
   locate(ways, stopId, start, terminus = null) {
     const at = latlon(this.stops.df.get(stopId));
-    const rivals = this.stops.positions(this.stops.rivals.get(stopId) || []);
+    const rivals = this.stops.positions(this.stops.rivalsOf(stopId));
     const options = { start, rivals, vehicle: this.vehicle, terminus };
     return locateStop(this.obj, ways, at, options) ?? locateStop(this.obj, ways, at, { ...options, max_m: Infinity });
   }
@@ -68,8 +98,8 @@ class LineBuilder {
     const s = stops.df.get(stopId);
     const road = spot && ((p) => roadDistance(obj, ways, p, spot.wayIndex));
     const side = spot && ((p) => sideSegment(obj, ways, spot, p));
-    const initial = choosePlatform(stops.platforms.get(stopId) || [], latlon(s), { segment, spotPos: spot?.pos, road, side });
-    const [c, dataId] = fixSide(stopId, initial, segment, stops, road, side);
+    this.spotPos = spot?.pos;
+    const [c, dataId] = this.choosePlatformOf(stopId, segment, road, side);
     if (dataId !== stopId) this.swapped.push(`${s.stop_name} (${stopId} -> ${dataId}${c ? "" : ", platform created"})`);
     const d = stops.df.get(dataId);
     if (c && !c.holder && !c.byRef && !c.sameName) this.unsure.push(`${d.stop_name} (${dataId}): ${c.id}${c.name ? ` "${c.name}"` : ""}`);
@@ -80,7 +110,7 @@ class LineBuilder {
     const platform = c ? c.id : this.created.get(dataId);
     const pos = c ? c.pos : latlon(d);
     // a platform created at the GTFS position is judged as the GTFS stop, an OSM platform on the road next to it
-    const kerb = segment ? Boolean(c ? onKerb(pos, segment, side) : kerbSide(pos, ...segment)) : null;
+    const kerb = stops.stations.has(stopId) ? true : segment ? Boolean(c ? onKerb(pos, segment, side) : kerbSide(pos, ...segment)) : null;
     if (!this.assignments.has(dataId)) this.assignments.set(dataId, new Map());
     const before = this.assignments.get(dataId).get(platform);
     this.assignments.get(dataId).set(platform, [this.network, pos, this.mode, kerb === true || before?.[3] === true]); // on the good side, one way at least
@@ -118,23 +148,27 @@ class LineBuilder {
     let start = 0, first = null, last = null;
     for (const [i, stopId] of v.seq.entries()) {
       const terminus = this.terminusOf(v, i);
-      let spot = this.locate(ways, stopId, start, terminus);
+      const bay = this.baySpot(ways, stopId, start);
+      let spot = bay ?? this.locate(ways, stopId, start, terminus);
       const { platform, dataId, pos, kerb } = this.choose(stopId, ways, spot);
       // the stop_position goes in front of the platform actually used: an existing OSM platform is more accurate than
       // the GTFS position (often tens of metres off)
-      if (!isNew(platform)) {
-        const rivals = (stops.rivals.get(dataId) || []).flatMap((r) => (stops.platforms.get(r) || [])
+      if (bay) spot = bay;
+      else if (!isNew(platform)) {
+        const rivals = stops.rivalsOf(dataId).flatMap((r) => (stops.platforms.get(r) || [])
           .filter((c) => c.id !== platform).map((c) => c.pos));
         spot = locateStop(obj, ways, pos, { start, rivals, vehicle: this.vehicle, platform: true, terminus, opposites: stops.opposites(dataId, platform) }) || spot;
       } else if (dataId !== stopId) {
         spot = this.locate(ways, dataId, start, terminus) || spot;
       }
+      spot = this.samePlace(ways, spot, dataId, start);
       if (spot) {
         start = spot.wayIndex;
         const name = stops.df.get(dataId).stop_name;
         if (spot.distance > settings.thresholds.stop_position_m) this.far.push(name);
         const stopPosition = materialize(obj, ways, spot, name, this.vehicle, { platform, exclusive: !stops.rivals.get(dataId)?.length });
         if (this.mode === "coach") obj.edit(stopPosition).tags.coach = "yes"; // required with route=coach by PTNA
+        setIn(this.placed, dataId).add(stopPosition);
         members.push([stopPosition, "stop"]);
         if (i === 0) first = [spot.wayIndex, stopPosition];
         if (i === v.seq.length - 1) last = [spot.wayIndex, stopPosition];

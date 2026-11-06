@@ -17,15 +17,16 @@ import { ExistingRoutes, WIKI_KEYS } from "./existing.js";
 import { bbox, inBbox, latlon } from "./geo.js";
 import { lineVariants, refSortKey, stopSequences } from "./gtfs.js";
 import { matchVariant } from "./matching.js";
-import { keepTraces, terminusRoads } from "./reuse.js";
+import { keepTraces, reachBays, terminusRoads } from "./reuse.js";
 import { lookup } from "./lookup.js";
 import { accentsFrom, agencyNetworks, cleanStopName, fixAccents, nameKey, slug, stopLabel, stopNames, words } from "./naming.js";
 import { services, valhallaReady } from "./net.js";
-import { Store, completeWayNodes, platformsIn, readWays, routesIn, writeOsm } from "./osm.js";
+import { Store, completeWayNodes, platformsIn, readWays, routesIn, stationsIn, writeOsm } from "./osm.js";
 import { filterRoadPlatforms, lostStops, nameNumberedNetworkTags, refKeyFor, tagPlatforms } from "./platforms.js";
 import { reviewRefs } from "./ref_review.js";
 import { activeFeed, settings } from "./settings.js";
 import { splitWays } from "./splitting.js";
+import { markStations } from "./stations.js";
 import { matchStops } from "./stops.js";
 import { dedupe, listIn, log, sortedBy, unique } from "./util.js";
 
@@ -252,7 +253,20 @@ async function prepareStops(feed, { allStops }, box, osmStops, detected) {
     settings.ref_from_stop_id = detectRefFromStopId(stops, osmStops);
     if (settings.ref_from_stop_id) detected.push(["Platform ref", "code of the NeTEx stop_id"]);
   }
+  await findStations(stops, box, osmStops);
   return stops;
+}
+
+/** The bays of the bus stations of the area and their stop_positions (stations.js). Without them, its stops are treated as any other. */
+async function findStations(stops, box, osmStops) {
+  try {
+    const { boxes, positions } = await stationsIn(box);
+    markStations(stops, boxes, positions, osmStops);
+    if (stops.stations.size) log.info(`${stops.stations.size} bay(s) of bus stations, ${[...stops.bays.values()].filter((b) => b.stop).length} with their stop_position`);
+  } catch (e) {
+    if (e.name === "AbortError") throw e;
+    log.warn(`bus stations not available (${e.message}): their bays are treated as any other stop`);
+  }
 }
 
 /** Final names of the stops (naming.stopNames) and their labels in the titles of the lines (naming.stopLabel). */
@@ -278,6 +292,7 @@ async function readRoads(variants, stops, osmStops, known) {
     v.ways = dedupe(v.ways.filter((w) => roads[w]?.nodes)); // ways deleted from OSM since the Valhalla tiles were built
     if (v.ways.length < before) log.warn(`  trip ${v.trip_id}: ${before - v.ways.length} way(s) from Valhalla missing from OSM (older Valhalla data)`);
   }
+  Object.assign(roads, { ...(await reachBays(variants, stops, roads)), ...roads });
   Object.assign(roads, { ...(await terminusRoads(variants, stops, roads)), ...roads });
   // a node of a travelled way (legacy highway=bus_stop on the carriageway) is a stop_position, not a platform
   const osm = { ...osmStops, ...roads };
