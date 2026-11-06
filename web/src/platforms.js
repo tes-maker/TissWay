@@ -338,8 +338,9 @@ export function fixSide(stopId, platform, segment, stops, road = null, side = nu
 
 export const CODE_IN_ID = /(?:^|:)[A-Z]{2}:[^:]*:ZE:([^:]+)/; // NeTEx-style ids: "FR:<INSEE>:ZE:<code>:..."
 
-/** ref of a platform: the stop_code, else (settings.ref_from_stop_id) the code of a NeTEx-style stop_id, else null. */
+/** ref of a platform: the stop_code, else (settings.ref_from_stop_id) the code of a NeTEx-style stop_id, else null. Always null with settings.stop_refs_from_gtfs off. */
 export function stopRef(stop, stopId) {
+  if (!settings.stop_refs_from_gtfs) return null;
   if (stop.stop_code) return stop.stop_code;
   const m = settings.ref_from_stop_id === true || settings.ref_from_stop_id === "yes" ? CODE_IN_ID.exec(stopId) : null;
   return m ? m[1] : null;
@@ -352,7 +353,7 @@ export function stopTags(stop, stopId, network, mode = "bus") {
   const tags = { public_transport: "platform", highway: "bus_stop", ...(VEHICLE[mode] === "bus" ? { bus: "yes" } : {}), ...(mode === "trolleybus" || mode === "coach" ? { [mode]: "yes" } : {}),
     name: stop.stop_name, ...network, [feedKey("gtfs:stop_id")]: stopId };
   if (stop.official_name) tags.official_name = stop.official_name;
-  if (stop.stop_code) tags[feedKey("gtfs:stop_code")] = stop.stop_code;
+  if (stop.stop_code && settings.stop_refs_from_gtfs) tags[feedKey("gtfs:stop_code")] = stop.stop_code;
   for (const t of settings.stop_ref_tags) tags[t] = stopId;
   const ref = stopRef(stop, stopId);
   if (ref) tags.ref = ref;

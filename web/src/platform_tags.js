@@ -58,7 +58,7 @@ export function feedTags(tags, stop, feedId, network = tags.network) {
   if (stopNames.length) t[`gtfs:stop_name${suffix}`] = stopNames.join(";");
   else delete t[`gtfs:stop_name${suffix}`];
   if (stop.stop_name !== t.name) addStopValue(t, `gtfs:stop_name${suffix}`, stop.stop_name);
-  if (stop.stop_code) {
+  if (stop.stop_code && settings.stop_refs_from_gtfs) {
     const key = `gtfs:stop_code${suffix}`;
     addStopValue(t, t.network && network !== t.network ? networkKeyFor(key, network) : key, stop.stop_code);
   }

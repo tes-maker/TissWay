@@ -542,6 +542,7 @@ function selectView(name) {
 /** The settings also on the converter. */
 function showOptions() {
   $("split-roundabouts").checked = settings.split_roundabouts;
+  $("stop-refs-from-gtfs").checked = settings.stop_refs_from_gtfs;
 }
 
 function showSettingsCount() {
@@ -627,6 +628,7 @@ function wire() {
     showRefRows();
   });
   $("split-roundabouts").addEventListener("change", (e) => setOption("split_roundabouts", e.target.checked));
+  $("stop-refs-from-gtfs").addEventListener("change", (e) => setOption("stop_refs_from_gtfs", e.target.checked));
   $("verbose").addEventListener("change", (e) => $("journal").classList.toggle("verbose", e.target.checked));
   $("only-warnings").addEventListener("change", (e) => $("journal").classList.toggle("only-warnings", e.target.checked));
   $("journal-clear").addEventListener("click", () => {

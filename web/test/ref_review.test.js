@@ -343,3 +343,15 @@ test("operator: a merged network name takes it under the name kept", () => {
   settings.network_merges = { "Nomad Car": "Nomad" };
   assert.equal(outputOf(converted({ ...NEW_SHARED, operator: "RATP Dev" }, "Nomad Car")[1]).operator, "RATP Dev;Keolis");
 });
+
+test("stop_refs_from_gtfs off: the ref of OSM stays where it is and is not proposed for removal", () => {
+  settings.stop_refs_from_gtfs = false;
+  const [moved, t] = reviewed({ ...SHARED, ref: "14CAE74A" });
+  assert.equal(t.ref, "14CAE74A");
+  assert.equal(t["ref:Nomad"], undefined);
+  assert.deepEqual(moved.corrected, []);
+  const [review] = reviewed({ ...SHARED, ref: "unknown", "ref:FR:Atoumod": "gone" });
+  const reason = (tag) => listRefs(review).find((r) => r.tag === tag).reason;
+  assert.equal(reason("ref"), "");
+  assert.equal(reason("ref:FR:Atoumod"), "not in the GTFS of Twisto"); // a stop_id, still judged
+});

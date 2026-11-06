@@ -8,6 +8,8 @@
 // feed no longer on the platform, a gtfs:stop_id:<feed> or gtfs:stop_code:<feed> unknown to this feed. Nothing is removed without being asked for: the
 // feed may be partial, and a mapper may have had a reason. The refs of the networks outside the feed cannot be judged, they can only be removed by hand.
 //
+// With settings.stop_refs_from_gtfs off, the codes of the feed are wrong and those of OSM right: only stop_ids say whose a value is, and no ref is judged by the codes.
+//
 // Two networks with very close names ("Nomad Car" and "Nomad") may be one network under two names: the window asks, nothing is merged without an answer.
 // The answer is kept in settings.network_merges, because each run brings the name of the feed back.
 //
@@ -32,14 +34,14 @@ export function networksOf(t) {
   return [...new Set([t.network, ...numbered.map((k) => t[k])].filter(Boolean))];
 }
 
-/** Value -> [{network, stop}]: stop_id, stop_code and NeTEx code of the stops called at by a single network. */
+/** Value -> [{network, stop}]: stop_id, stop_code and NeTEx code (only the stop_id with settings.stop_refs_from_gtfs off) of the stops called at by a single network. */
 function valuesOfStops(stops, ofStop) {
   const known = new Map();
   for (const stop of stops) {
     const networks = ofStop.get(stop.stop_id);
     if (networks?.size !== 1) continue;
     const [network] = networks;
-    const values = [stop.stop_id, stop.stop_code, CODE_IN_ID.exec(stop.stop_id)?.[1]].filter(Boolean);
+    const values = [stop.stop_id, ...(settings.stop_refs_from_gtfs ? [stop.stop_code, CODE_IN_ID.exec(stop.stop_id)?.[1]] : [])].filter(Boolean);
     for (const value of values) {
       if (!known.has(value)) known.set(value, []);
       known.get(value).push({ network, pos: [Number(stop.stop_lat), Number(stop.stop_lon)] });
@@ -252,7 +254,7 @@ export function priorityRows(review) {
 const REF_TAG = /^(?:ref(?::|$)|gtfs:stop_(?:id|code)(?::|$))/;
 
 /** Why this value is obsolete, "" if nothing says so. */
-function obsoleteBecause(review, tag, value, network, nets) {
+function obsoleteBecause(review, tag, value, base, network, nets) {
   if (!review.inFeed.size) return "";
   if (tag.startsWith("gtfs:")) {
     const inCurrentFeed = review.feed && (tag === `gtfs:stop_code:${review.feed}` || tag.startsWith(`gtfs:stop_code:${review.feed}:`)
@@ -260,6 +262,7 @@ function obsoleteBecause(review, tag, value, network, nets) {
     return inCurrentFeed && !review.inFeed.has(value) ? "not in this GTFS" : "";
   }
   if (network && !nets.includes(network)) return `${network} is no longer on this stop`;
+  if (base === "ref" && !settings.stop_refs_from_gtfs) return "";
   const inFeed = network && [...review.feedNetworks].some((n) => n === network || n.startsWith(`${network} `));
   return inFeed && !review.inFeed.has(value) ? `not in the GTFS of ${network}` : "";
 }
@@ -278,7 +281,7 @@ export function listRefs(review) {
     const t = review.obj.get(platform).tags, nets = networksOf(t);
     return Object.keys(t).filter((tag) => REF_TAG.test(tag)).flatMap((tag) => split(t[tag]).map((value) => {
       const { base, network } = slotInfo(review, t, tag, nets);
-      return { platform, name: t.name || platform, tag, value, base, network, reason: obsoleteBecause(review, tag, value, network, nets) };
+      return { platform, name: t.name || platform, tag, value, base, network, reason: obsoleteBecause(review, tag, value, base, network, nets) };
     }));
   });
 }
