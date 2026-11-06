@@ -151,15 +151,8 @@ export const stopPositionsAround = (points, radius) => {
   return overpass(`(${around})->.s;.s out meta;way(bn.s)[highway]->.w;.w out meta;node(w.w);out meta;`).then(fromOverpass);
 };
 
-/** {boxes: bounds of the bus stations of a bbox, positions: {key: object} of its stop_positions}, see stations.js. */
-export async function stationsIn(box) {
-  const b = bboxText(box);
-  const elements = await overpass(`(nwr[amenity=bus_station](${b});nwr[public_transport=station][bus=yes](${b}););out tags bb;node[public_transport=stop_position](${b});out meta;`);
-  const isPosition = (e) => e.tags?.public_transport === "stop_position";
-  const isStation = (e) => e.tags?.amenity === "bus_station" || (e.tags?.public_transport === "station" && e.tags.bus === "yes");
-  const boxes = elements.filter(isStation).map((e) => e.bounds ?? { minlat: e.lat, minlon: e.lon, maxlat: e.lat, maxlon: e.lon }).filter((x) => x.minlat !== undefined);
-  return { boxes, positions: fromOverpass(elements.filter(isPosition)) };
-}
+/** {key: object} of the stop_positions of a bbox, see stops.pairStopPositions. */
+export const stopPositionsIn = (box) => overpass(`node[public_transport=stop_position](${bboxText(box)});out meta;`).then(fromOverpass);
 
 /** The roads within radius metres of these points [lat, lon], and their nodes. */
 export const roadsAround = (points, radius) => overpass(`(${points.map(([lat, lon]) => `way[highway](around:${radius},${lat},${lon});`).join("")})->.w;.w out meta;node(w.w);out meta;`).then(fromOverpass);

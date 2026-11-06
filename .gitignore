@@ -8,6 +8,7 @@ gtfs*.zip
 *.swp
 
 node_modules/
+valhalla_data/
 
 npm-debug.log*
 

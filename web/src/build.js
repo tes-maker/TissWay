@@ -7,7 +7,7 @@ import { isNew, newKey } from "./osm.js";
 import { linkNode } from "./splitting.js";
 import { VEHICLE, choosePlatform, completeRouteRef, fixSide, kerbSide, locateStop, makeSpot, materialize, onKerb, roadDistance, sideSegment, stopSegment } from "./platforms.js";
 import { settings } from "./settings.js";
-import { counter, dedupe, listIn, log, setIn, unique } from "./util.js";
+import { counter, dedupe, listIn, log, minBy, setIn, unique } from "./util.js";
 import { chooseVias } from "./via.js";
 
 const HEX_COLOUR = /^#?([0-9A-Fa-f]{6})$/;
@@ -48,12 +48,12 @@ class LineBuilder {
     this.placed = new Map(); // stop_id -> the stop_positions of this stop, one for all the variants on a road
   }
 
-  /** Spot at the stop_position of the bay of stopId, when the trace goes there, else null. */
-  baySpot(ways, stopId, start) {
-    const node = this.stops.bays.get(stopId)?.stop;
+  /** Spot at the stop_position paired with this platform (see stops.pairStopPositions) when the trace goes there, the passage nearest to spot, else null. owner: the platform, or the stop without one. */
+  pairedSpot(ways, owner, start, spot) {
+    const node = this.stops.paired.get(owner);
     if (!node) return null;
-    for (let i = start; i < ways.length; i++) if (this.obj.get(ways[i]).nodes.includes(node)) return makeSpot(i, latlon(this.obj.get(node)), 0, { node });
-    return null;
+    const on = ways.flatMap((w, i) => (i >= start && this.obj.get(w).nodes.includes(node) ? [i] : []));
+    return on.length ? makeSpot(minBy(on, (i) => Math.abs(i - (spot?.wayIndex ?? start))), latlon(this.obj.get(node)), 0, { node }) : null;
   }
 
   /** The spot unchanged, or at the stop_position a previous variant has for this stop, rather than a second one next to it. */
@@ -65,16 +65,6 @@ class LineBuilder {
       if (at >= 0) return makeSpot(at, latlon(this.obj.get(node)), spot.distance, { node });
     }
     return spot;
-  }
-
-  /** [platform or null, stop_id whose data it takes] of a stop: a bay of a station stays itself, whatever the side, with the platform of its bay. */
-  choosePlatformOf(stopId, segment, road, side) {
-    const { stops } = this, s = stops.df.get(stopId), candidates = stops.platforms.get(stopId) || [];
-    if (stops.stations.has(stopId)) {
-      const bay = stops.bays.get(stopId)?.platform;
-      return [(bay && candidates.find((c) => c.id === bay.id)) ?? choosePlatform(stops.freeBays(stopId), latlon(s)), stopId];
-    }
-    return fixSide(stopId, choosePlatform(candidates, latlon(s), { segment, spotPos: this.spotPos, road, side }), segment, stops, road, side);
   }
 
   /** Spot of the stop_position of stopId (at pos, default: the GTFS position) from ways[start]; beyond stop_position_m, at
@@ -98,8 +88,8 @@ class LineBuilder {
     const s = stops.df.get(stopId);
     const road = spot && ((p) => roadDistance(obj, ways, p, spot.wayIndex));
     const side = spot && ((p) => sideSegment(obj, ways, spot, p));
-    this.spotPos = spot?.pos;
-    const [c, dataId] = this.choosePlatformOf(stopId, segment, road, side);
+    const initial = stops.bays.has(stopId) ? stops.bayPlatform(stopId) : choosePlatform(stops.platforms.get(stopId) || [], latlon(s), { segment, spotPos: spot?.pos, road, side });
+    const [c, dataId] = stops.bays.has(stopId) ? [initial, stopId] : fixSide(stopId, initial, segment, stops, road, side);
     if (dataId !== stopId) this.swapped.push(`${s.stop_name} (${stopId} -> ${dataId}${c ? "" : ", platform created"})`);
     const d = stops.df.get(dataId);
     if (c && !c.holder && !c.byRef && !c.sameName) this.unsure.push(`${d.stop_name} (${dataId}): ${c.id}${c.name ? ` "${c.name}"` : ""}`);
@@ -110,7 +100,7 @@ class LineBuilder {
     const platform = c ? c.id : this.created.get(dataId);
     const pos = c ? c.pos : latlon(d);
     // a platform created at the GTFS position is judged as the GTFS stop, an OSM platform on the road next to it
-    const kerb = stops.stations.has(stopId) ? true : segment ? Boolean(c ? onKerb(pos, segment, side) : kerbSide(pos, ...segment)) : null;
+    const kerb = stops.bays.has(stopId) ? true : segment ? Boolean(c ? onKerb(pos, segment, side) : kerbSide(pos, ...segment)) : null;
     if (!this.assignments.has(dataId)) this.assignments.set(dataId, new Map());
     const before = this.assignments.get(dataId).get(platform);
     this.assignments.get(dataId).set(platform, [this.network, pos, this.mode, kerb === true || before?.[3] === true]); // on the good side, one way at least
@@ -148,12 +138,12 @@ class LineBuilder {
     let start = 0, first = null, last = null;
     for (const [i, stopId] of v.seq.entries()) {
       const terminus = this.terminusOf(v, i);
-      const bay = this.baySpot(ways, stopId, start);
-      let spot = bay ?? this.locate(ways, stopId, start, terminus);
+      let spot = this.locate(ways, stopId, start, terminus);
       const { platform, dataId, pos, kerb } = this.choose(stopId, ways, spot);
+      const paired = this.pairedSpot(ways, isNew(platform) ? dataId : platform, start, spot);
       // the stop_position goes in front of the platform actually used: an existing OSM platform is more accurate than
       // the GTFS position (often tens of metres off)
-      if (bay) spot = bay;
+      if (paired) spot = paired;
       else if (!isNew(platform)) {
         const rivals = stops.rivalsOf(dataId).flatMap((r) => (stops.platforms.get(r) || [])
           .filter((c) => c.id !== platform).map((c) => c.pos));

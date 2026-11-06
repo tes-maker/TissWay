@@ -5,7 +5,7 @@
 // A relation with nothing left to do is complete (completeRelation): its ways and stops are all right, so that it is left as it is, ways not split.
 //
 // The stop_position of a terminus may be just beyond the trace: terminusRoads brings the road it is on, to avoid creating a duplicate.
-// The one of a bay of a bus station may be further, the shape stopping at the entrance of the station: reachBays takes the trace there.
+// The one of a bay of a bus station may be further, the shape stopping at the entrance of the station: reachStopPositions takes the trace there.
 
 import { dist, latlon, project } from "./geo.js";
 import { Store, readWays, roadsAround, stopPositionsAround } from "./osm.js";
@@ -72,7 +72,7 @@ function endsAt(ways, first, last, obj) {
 /** [{stop, platform, way, pos}] for each stop of the variant, when the relation has nothing left to do, else null: a stop_position and a platform for each
  * GTFS stop, in order, each platform being one of the stop's, on the kerb side and not on the road, each stop_position not closer to the stop across the road, and a trace
  * ending exactly at its first and last stop_positions. The trace itself has been judged by traceProblem. */
-export function completeRelation(relation, v, stops, ways, obj, vehicle = "bus") {
+function completeRelation(relation, v, stops, ways, obj, vehicle = "bus") {
   const ofRole = (role) => relation.members.filter(([, r]) => r.startsWith(role)).map(([ref]) => ref);
   const stopNodes = ofRole("stop"), platforms = ofRole("platform");
   if (stopNodes.length !== v.seq.length || platforms.length !== v.seq.length) return null;
@@ -84,13 +84,14 @@ export function completeRelation(relation, v, stops, ways, obj, vehicle = "bus")
   for (const [i, id] of v.seq.entries()) {
     const c = (stops.platforms.get(id) || []).find((p) => p.id === platforms[i]);
     if (!c || onRoad.has(c.id)) return null;
-    const bay = stops.bays?.get(id);
-    if (bay && (bay.platform.id !== c.id || (bay.stop && bay.stop !== stopNodes[i]))) return null; // not the stop_position or the platform of this bay
+    if (stops.bays?.has(id) && stops.platformByRef(id) && stops.platformByRef(id).id !== c.id) return null; // the platform of another bay
+    const paired = stops.paired?.get(c.id);
+    if (paired && paired !== stopNodes[i] && onRoad.has(paired)) return null; // the trace passes at the stop_position of this platform, and the relation has another one
     while (at < ways.length && !obj.get(ways[at]).nodes.includes(stopNodes[i])) at++;
     if (at === ways.length) return null;
     const spot = makeSpot(at, latlon(obj.get(stopNodes[i])), 0, { node: stopNodes[i] });
-    if (!stops.stations?.has(id) && !onKerb(c.pos, stopSegment(obj, ways, spot), (p) => sideSegment(obj, ways, spot, p))) return null;
-    if (closerToOpposite(obj, ways.slice(Math.max(at - 1, 0), at + 2), spot.pos, c.pos, stops.opposites(id, c.id))) {
+    if (!stops.bays?.has(id) && !onKerb(c.pos, stopSegment(obj, ways, spot), (p) => sideSegment(obj, ways, spot, p))) return null;
+    if (paired !== stopNodes[i] && closerToOpposite(obj, ways.slice(Math.max(at - 1, 0), at + 2), spot.pos, c.pos, stops.opposites(id, c.id))) {
       log.debug(`  ${stopNodes[i]} is closer to the stop across the road than to ${id}: this stop gets its own stop_position`);
       return null;
     }
@@ -199,10 +200,9 @@ function travelledNodes(obj, ways) {
 
 const withoutRepeat = (ways) => ways.filter((w, i) => w !== ways[i - 1]);
 
-/** The ways of a trace going through node, the stop_position of the stop at position i of n, by the shortest way on these roads, or null if it cannot. First stop: from node to the trace, what comes
- * before being left out; last stop: from the trace to node; in between: there and back. */
-export function throughNode(obj, ways, node, i, n, roads) {
-  const limit = settings.thresholds.bay_road_m;
+/** The ways of a trace going through node, the stop_position of the stop at position i of n, by the shortest way on these roads within limit metres, or null if it cannot. First stop: from node to the
+ * trace, what comes before being left out; last stop: from the trace to node; in between: there and back. */
+export function throughNode(obj, ways, node, i, n, roads, limit) {
   const on = travelledNodes(obj, ways);
   const out = i < n - 1 ? nearestOnGraph(roadGraph(obj, roads, false), node, on, limit) : null;
   const back = i > 0 ? nearestOnGraph(roadGraph(obj, roads, true), node, on, limit) : null;
@@ -213,33 +213,39 @@ export function throughNode(obj, ways, node, i, n, roads) {
   return withoutRepeat([...before, ...after]);
 }
 
-/** Bring the traces to the stop_position of each bay of a station on their way, when the GTFS shape stops before it, by the roads of the station (see stations.js). Returns the ways and nodes read. */
-export async function reachBays(variants, stops, roads) {
+const SERVICE = new Set(["service", "busway", "bus_guideway"]);
+
+/** Bring the traces to the stop_position of the platform with the ref of their stops, when the GTFS shape stops before it, by the roads a bus may take: for a first or last stop, within terminus_m, or
+ * bay_road_m for a bay; in between, only by a stop_position on a road of service, as a bay: a line does not leave its road for a stop_position on a street alongside. Returns the ways and nodes read. */
+export async function reachStopPositions(variants, stops, roads) {
   const pending = variants.filter((v) => !v.complete && v.ways.length).flatMap((v) => v.seq.map((id, i) => [v, id, i])).filter(([v, id]) => {
-    const node = stops.bays?.get(id)?.stop;
+    const node = stops.stopPositionOf(id);
     return node && !v.ways.some((w) => roads[w].nodes.includes(node));
   });
-  if (!pending.length) return {};
-  const points = unique(pending.map(([, id]) => stops.bays.get(id).platform.pos.join())).map((p) => p.split(",").map(Number));
+  const { bay_road_m, terminus_m } = settings.thresholds;
+  if (!pending.length || !bay_road_m) return {};
+  const points = unique(pending.map(([, id]) => (stops.platformByRef(id)?.pos ?? latlon(stops.df.get(id))).join()));
   let found;
   try {
-    found = await roadsAround(points, settings.thresholds.bay_road_m);
+    found = await roadsAround(points.map((p) => p.split(",").map(Number)), bay_road_m);
   } catch (e) {
     if (e.name === "AbortError") throw e;
-    log.warn(`roads of the bus station not available (${e.message})`);
+    log.warn(`roads around the stops not available (${e.message})`);
     return {};
   }
   const obj = new Store({ ...found, ...roads });
   const keys = Object.keys(found).filter((k) => k[0] === "w");
   for (const [v, id, i] of pending) {
-    const node = stops.bays.get(id).stop;
-    if (v.ways.some((w) => obj.get(w).nodes.includes(node))) continue;
-    const ways = throughNode(obj, v.ways, node, i, v.seq.length, keys);
+    const node = stops.stopPositionOf(id), name = stops.df.get(id).stop_name, end = i === 0 || i === v.seq.length - 1;
+    if (!obj.has(node) || v.ways.some((w) => obj.get(w).nodes.includes(node))) continue;
+    if (!end && !keys.some((w) => SERVICE.has(obj.get(w).tags.highway) && obj.get(w).nodes.includes(node))) continue;
+    const limit = stops.bays.has(id) ? bay_road_m : terminus_m;
+    const ways = throughNode(obj, v.ways, node, i, v.seq.length, keys, limit);
     if (ways) {
       v.ways = ways;
-      log.info(`  trip ${v.trip_id}: trace taken to the stop_position ${node} of ${stops.df.get(id).stop_name} (${stops.bays.get(id).platform.id})`);
-    } else {
-      log.warn(`  trip ${v.trip_id}: no road from the trace to the stop_position ${node} of ${stops.df.get(id).stop_name} within ${settings.thresholds.bay_road_m} m (to check)`);
+      log.info(`  trip ${v.trip_id}: trace taken to the stop_position ${node} of ${name}`);
+    } else if (stops.bays.has(id)) {
+      log.warn(`  trip ${v.trip_id}: no road from the trace to the stop_position ${node} of ${name} within ${limit} m (to check)`);
     }
   }
   return found;

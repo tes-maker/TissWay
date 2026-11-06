@@ -72,6 +72,9 @@ test("a platform with the code of the stop as a ref: a candidate up to ref_m, ev
   for (const tags of [{ ref: "77" }, { "ref:Twisto": "77" }, { ref: "9;77" }, { "gtfs:stop_code:FR-X": "77" }]) assert.deepEqual(candidates(tags), [["n1", true, true]], JSON.stringify(tags));
   assert.deepEqual(candidates({ ref: "78" }), []);
   assert.deepEqual(candidates({ local_ref: "77" }), []);
+  assert.deepEqual(candidates({ ref: "77" }, 49.00126), [["n1", true, true]]); // 140 m: within the 150 m by default
+  assert.deepEqual(candidates({ ref: "77" }, 49.00145), []); // 161 m
+  settings.thresholds.ref_m = 50;
   assert.deepEqual(candidates({ ref: "77" }, 49.00054), []); // 60 m: too far
   settings.thresholds.ref_m = 70;
   assert.deepEqual(candidates({ ref: "77" }, 49.00054), [["n1", true, true]]);

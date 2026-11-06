@@ -10,9 +10,9 @@
 
 import { Grid, latlon, osmPosition } from "./geo.js";
 import { nameKey, stopKey } from "./naming.js";
-import { CODE_IN_ID } from "./platforms.js";
+import { CODE_IN_ID, choosePlatform, isStopPositionFor } from "./platforms.js";
 import { settings } from "./settings.js";
-import { setIn, splitTag } from "./util.js";
+import { setIn, sortedBy, splitTag } from "./util.js";
 
 /** Code shared by the platforms of one stop: the stop_code without its trailing letter ("2702282A" -> "2702282"),
  * null if the code does not have that form. */
@@ -33,8 +33,8 @@ export class Stops {
     this.holders = holders; // stop_id -> Set of OSM platforms already carrying it (gtfs:stop_id*, stop_ref_tags)
     this.rivals = rivals; // stop_id -> neighbours + same-name stops nearby
     this.refHolders = refHolders; // stop_id -> Set of OSM platforms within ref_m with its code as a ref
-    this.stations = new Set(); // stop_ids that are bays of a bus station (stations.markStations)
-    this.bays = new Map(); // of these, stop_id -> {platform: candidate, stop: key of its stop_position or null}
+    this.bays = new Set(); // stop_ids that are bays: their name has at least 3 platforms with a ref (pairStopPositions)
+    this.paired = new Map(); // OSM platform, or stop_id without a platform -> its stop_position (pairStopPositions)
   }
 
   /** Positions of the stops a stop_position of this stop is compared with: the OSM platforms of its rivals, other than the one it uses, else their GTFS position. */
@@ -45,19 +45,60 @@ export class Stops {
     });
   }
 
-  /** Its rivals, none for a bay of a station: the other bays are not across a road. */
+  /** Its rivals, none for a bay: the other bays are not across a road. */
   rivalsOf(stopId) {
-    return this.stations.has(stopId) ? [] : this.rivals.get(stopId) || [];
+    return this.bays.has(stopId) ? [] : this.rivals.get(stopId) || [];
   }
 
-  /** Its candidate platforms, without those of the other bays of its station. */
-  freeBays(stopId) {
-    const others = new Set([...this.bays].filter(([id]) => id !== stopId).map(([, bay]) => bay.platform.id));
-    return (this.platforms.get(stopId) || []).filter((c) => !others.has(c.id));
+  /** The OSM platform with the ref of this stop, whatever the side of the road and the distance: see choosePlatform. null without one. */
+  platformByRef(stopId) {
+    const own = (this.platforms.get(stopId) || []).filter((c) => c.holder || c.byRef);
+    return choosePlatform(own.map((c) => ({ ...c, far: false })), latlon(this.df.get(stopId)));
+  }
+
+  /** The platform of a bay: the one with its ref, else one of its candidates that no other bay has its ref on. */
+  bayPlatform(stopId) {
+    const taken = new Set((this.rivals.get(stopId) || []).map((r) => this.platformByRef(r)?.id));
+    const free = (this.platforms.get(stopId) || []).filter((c) => !taken.has(c.id)).map((c) => ({ ...c, far: false }));
+    return this.platformByRef(stopId) ?? choosePlatform(free, latlon(this.df.get(stopId)));
+  }
+
+  /** The stop_position of this stop, before its platform is known for sure: the one of the platform with its ref, else, without any platform, its own. */
+  stopPositionOf(stopId) {
+    return this.paired.get(this.platformByRef(stopId)?.id ?? stopId) ?? null;
   }
 
   positions(ids) {
     return ids.map((s) => latlon(this.df.get(s)));
+  }
+}
+
+const BAYS = 3; // more platforms with a ref under one name than the two sides of a road
+
+/** Set stops.bays and stops.paired. Each OSM platform takes the nearest stop_position within stop_position_reuse_m, each of them for one platform only, the closest pairs first. A stop without a
+ * platform of its own counts at its GTFS position: a stop_position is left to it, if nearest. A platform with the stop_id or the ref of a stop of which another platform was chosen is a duplicate, and does not count.
+ * positions, osm: {key: object} of the stop_positions and of the OSM stops. */
+export function pairStopPositions(stops, positions, osm) {
+  const byRef = new Map([...stops.df.keys()].map((id) => [id, stops.platformByRef(id)]));
+  for (const id of stops.df.keys()) {
+    const key = stopKey(stops.df.get(id).stop_name);
+    const same = [id, ...(stops.rivals.get(id) || []).filter((r) => stopKey(stops.df.get(r).stop_name) === key)];
+    if (new Set(same.map((s) => byRef.get(s)?.id).filter(Boolean)).size >= BAYS) stops.bays.add(id);
+  }
+  const chosen = new Set([...byRef.values()].filter(Boolean).map((c) => c.id));
+  const holding = new Set([...stops.df.keys()].flatMap((id) => (stops.platforms.get(id) || []).filter((c) => c.holder || c.byRef).map((c) => c.id)));
+  const owners = [
+    ...osmPlatforms(osm).filter((p) => chosen.has(p.id) || !holding.has(p.id)).map((p) => [p.id, p.pos]),
+    ...[...stops.df].filter(([id]) => !(stops.platforms.get(id) || []).some((c) => c.holder || c.byRef || c.sameName)).map(([id, s]) => [id, latlon(s)]),
+  ];
+  const nodes = Object.entries(positions).filter(([, o]) => o.lat !== undefined && isStopPositionFor(o.tags)).map(([k, o]) => [k, latlon(o)]);
+  const reach = settings.thresholds.stop_position_reuse_m, grid = new Grid(nodes, ([, pos]) => pos, Math.max(reach, 1));
+  const pairs = owners.flatMap(([owner, pos]) => grid.within(pos, reach).map(([[node], d]) => [d, owner, node]));
+  const used = new Set();
+  for (const [, owner, node] of sortedBy(pairs, ([d]) => d)) {
+    if (stops.paired.has(owner) || used.has(node)) continue;
+    stops.paired.set(owner, node);
+    used.add(node);
   }
 }
 
@@ -143,7 +184,10 @@ export function matchStops(stopRows, agencies, osm) {
   }
 
   for (const [stopId, candidates] of platforms) {
-    for (const c of candidates) c.claimed = [...(claims.get(c.id) ?? [])].some((id) => id !== stopId);
+    for (const c of candidates) {
+      c.claimed = [...(claims.get(c.id) ?? [])].some((id) => id !== stopId);
+      c.shared = [...holders].some(([id, keys]) => id !== stopId && df.has(id) && keys.has(c.id)); // it holds the stop_id of another stop as well
+    }
   }
 
   const neighbours = new Map(stopRows.map((s) => [s.stop_id, []]));

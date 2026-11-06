@@ -5,13 +5,14 @@
 // - the stop_position lies on the travelled way, at the projection of the GTFS stop, in two steps: locateStop finds
 //   the spot without changing anything, materialize creates the node or reuses an existing stop_position, so that
 //   the caller can fix the side of the stop (fixSide) before anything is written;
-// - when an existing OSM platform is used, the existing stop_position nearest to it is reused, unless it clearly
+// - a platform takes the nearest existing stop_position, each of them going to one platform (stops.pairStopPositions), when the trace goes there;
+// - otherwise, when an existing OSM platform is used, the existing stop_position nearest to it is reused, unless it clearly
 //   belongs to the platform of a rival stop (nearestToPlatform);
 // - otherwise an existing stop_position is reused when near the projection of the stop, unless closer to the
 //   projection of a rival across the road: on a two-way road both directions are often one way, and the
 //   stop_position of the opposite stop may be within reach (reusable);
-// - whatever the above, a stop_position closer to the stop across the road than to this stop is not reused, even on a good trace (closerToOpposite,
-//   settings.stop_position_own): it is left to that stop, and this stop gets its own;
+// - a stop_position closer to the stop across the road than to this stop is not reused, even on a good trace (closerToOpposite, settings.stop_position_own): it is left to that stop, and
+//   this stop gets its own, unless closer than stop_position_shared_m: a stop_position is only created in last resort (sharedWith);
 // - a stop_position only carries public_transport=stop_position, <vehicle>=yes and name, replaced by the name of the stop: what an existing one has more goes to its platform
 //   when it lacks it (stopPositionOnly), but for what describes something else on the node, like a crossing;
 // - the platform is chosen on the kerb side of the way (settings.driving_side) in the direction of travel, judged
@@ -152,6 +153,13 @@ function nearestToPlatform(obj, ways, run, pos, target, rivals, vehicle, terminu
   return smallest(found);
 }
 
+/** [way index, node] of the existing stop_position so close to target that a second one would duplicate it (stop_position_shared_m), whoever it is left to, or null. */
+function sharedWith(obj, ways, run, target, vehicle) {
+  const found = [];
+  for (const [j, n, p] of stopPositionsOn(obj, ways, run, vehicle)) if (dist(p, target) <= settings.thresholds.stop_position_shared_m) found.push([dist(p, target), j, n]);
+  return smallest(found);
+}
+
 /** Spot of the stop_position of a GTFS stop at pos on the first run of ways, from ways[start], passing within max_m
  * (default stop_position_m) of it, or null. Nothing is changed (see materialize). rivals: positions of the GTFS stops
  * that may own an existing stop_position nearby. platform: pos is the OSM platform used, rivals the OSM platforms of
@@ -179,7 +187,7 @@ export function locateStop(obj, ways, pos, { start = 0, max_m = null, rivals = [
   const nodes = obj.get(ways[i]).nodes;
   const pa = latlon(obj.get(nodes[k])), pb = latlon(obj.get(nodes[k + 1]));
   const target = interpolate(pa, pb, t);
-  const reuse = (platform ? nearestToPlatform : reusable)(obj, ways, run, pos, target, rivals, vehicle, terminus, opposites);
+  const reuse = (platform ? nearestToPlatform : reusable)(obj, ways, run, pos, target, rivals, vehicle, terminus, opposites) ?? sharedWith(obj, ways, run, target, vehicle);
   if (reuse) return makeSpot(reuse[0], latlon(obj.get(reuse[1])), d, { node: reuse[1] });
   const length = dist(pa, pb);
   t = length > 2 ? Math.min(Math.max(t, 1 / length), 1 - 1 / length) : 0.5; // not on top of an existing node
@@ -306,17 +314,14 @@ const nearest = (candidates, ref) => minBy(candidates, (c) => dist(ref, c.pos)) 
 const hasItsRef = (c) => c.holder || c.byRef;
 
 /** The OSM platform of a stop, on the kerb side of the road, or null to create one:
- * 1. the one with its ref: carrying its stop_id, else with its code as a ref, the nearest;
+ * 1. the one with its ref: carrying its stop_id, then with its code as a ref, then holding no other stop, then drawn as a way (a stray node comes after the platform drawn), then the nearest;
  * 2. else the one with its name, the nearest to the GTFS stop, or to the stop_position (spotPos), more accurate;
  * 3. else one very close (thresholds.platform_unclaimed_m), whatever its name, that no other stop has the ref or the name of: a second platform would duplicate it. The caller reports it.
  * Unverified far candidates are left out. Without a segment, the side is not judged. */
 export function choosePlatform(candidates, stop, { segment = null, spotPos = null, road = null, side = null } = {}) {
   const usable = candidates.filter((c) => verified(c, segment, road, side) && (!segment || onKerb(c.pos, segment, side)));
   const ofRef = usable.filter(hasItsRef);
-  if (ofRef.length) {
-    const holders = ofRef.filter((c) => c.holder);
-    return nearest(holders.length ? holders : ofRef, stop);
-  }
+  if (ofRef.length) return minBy(ofRef, (c) => [c.holder ? 0 : 1, c.byRef ? 0 : 1, c.shared ? 1 : 0, c.id[0] === "w" ? 0 : 1, dist(stop, c.pos)]);
   const named = usable.filter((c) => c.sameName);
   if (named.length) return nearest(named, segment && spotPos ? spotPos : stop);
   return nearest(usable.filter((c) => !c.claimed && dist(stop, c.pos) <= settings.thresholds.platform_unclaimed_m), stop);

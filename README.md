@@ -49,7 +49,9 @@ The Activity log says which variants were routed through their stops.
 Each stop gets a stop_position on the travelled way, in front of the existing OSM platform used (GTFS
 coordinates are often tens of metres off), else at the projection of the GTFS stop:
 
-- in front of an existing OSM platform, the existing stop_position nearest to that platform is reused
+- **each platform takes the nearest existing stop_position** (within `stop_position_reuse_m`), the closest pairs first, a stop_position going to one platform only, when the trace passes there.
+  A platform with the `stop_id` or the `ref` of a stop of which another platform is used is a duplicate, and takes none;
+- otherwise, in front of an existing OSM platform, the existing stop_position nearest to that platform is reused
   (within `stop_position_reuse_m` of its projection on the way), unless it is clearly closer to the
   platform of the stop across the road;
 - otherwise an existing stop_position is reused if it is within `stop_position_reuse_m` of the projection;
@@ -58,8 +60,11 @@ coordinates are often tens of metres off), else at the projection of the GTFS st
   of the same name (or the opposite platform) across the road, it is left to that stop and a new
   stop_position is created closer on the way, in front of our stop. Otherwise both directions would stop
   at the same spot;
-- **checked for every stop, even on a good trace** (`stop_position_own`, on by default): compared along the road, a stop_position closer to the stop across the road than to
+- **checked for every stop without a stop_position of its own, even on a good trace** (`stop_position_own`, on by default): compared along the road, a stop_position closer to the stop across the road than to
   this stop, by more than 2 m, is left to that stop and this one gets its own. The trace is kept. Off: only the rule above applies;
+- **a stop_position is only created in last resort**: never within `stop_position_shared_m` of an existing one on the trace, whoever it is left to, and once per stop for all the variants;
+- **the trace goes up to that stop_position** when the GTFS shape stops before it, for a first or last stop (within `terminus_m` along the roads a bus may take, `bay_road_m` for a bay), and in the middle of a line only
+  for a stop_position on a road of service;
 - stops facing each other (projections within `stop_position_shared_m`) share one stop_position, and
   same-name stops on the same kerb are treated as one platform (aggregated feeds list the same platform
   under several networks);
@@ -96,10 +101,15 @@ lines converted go in the file corrected, even a relation of the line that no va
   platform for each GTFS stop, in order, each platform being one of the stop's and on the kerb side, each stop_position not closer to the stop across the road, and a trace ending exactly at its first and last
   stop_positions. Its tags are still completed. A way another line must split is still replaced by its parts.
 
+### Bus stations
+
+A name with at least 3 platforms with a `ref` nearby is a bus station: its stops are bays. Each one takes the platform with its `ref`, whatever the side of the road, and no bay stands for another, nor is across the road from another.
+No `amenity=bus_station` is needed. A bay drawn as a way goes before a stray node with the same `stop_id`, and a platform holding this stop alone before one holding two.
+
 ### Platforms
 
 - The platform is picked on the kerb side of the way in the direction of travel: the OSM platform already carrying the
-  `stop_id` (within 100 m), else the one whose `ref`, `ref:*` or `gtfs:stop_code` is the code of the stop (within 50 m). If it is
+  `stop_id` (within 100 m), else the one whose `ref`, `ref:*` or `gtfs:stop_code` is the code of the stop (within `ref_m`, 150 m; beyond 30 m, it must be on the kerb side and next to the way). If it is
   across the road, the stop opposite in the GTFS is used. Else the platform with the name of the stop (within 100 m), else one within
   15 m that no other stop has the ref or the name of (reported to check). With no stop nearby on the other side, its platform across the
   road is kept (single pole, reported). Otherwise a platform is created at the GTFS position.
