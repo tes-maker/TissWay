@@ -89,3 +89,24 @@ test("the code in a NeTEx stop_id counts as a ref; with the codes of the GTFS no
   assert.deepEqual(refHolders("77"), []);
   assert.deepEqual(refHolders("FR:14:ZE:abc:1"), ["n1"]);
 });
+
+test("a strong name: case, accents, the town, brackets and St do not count; other words do", () => {
+  const sameName = (stopName, tags) => matchStops(gtfs([["A", "", stopName, "", 49.0, 1.0]]), null, { n1: { version: "1", lat: 49.0001, lon: 1, tags } }).platforms.get("A")[0].sameName;
+  assert.equal(sameName("Hôpital", { name: "HOPITAL" }), true);
+  assert.equal(sameName("CAEN - Gare", { name: "Gare" }), true);
+  assert.equal(sameName("Gare", { name: "Caen - Gare" }), true);
+  assert.equal(sameName("Bravo", { name: "Bravo (ancien)" }), true);
+  assert.equal(sameName("St Pierre", { name: "Saint-Pierre" }), true);
+  assert.equal(sameName("Mairie", { name: "Autre", official_name: "CAEN - Mairie" }), true);
+  assert.equal(sameName("Mairie", { name: "Autre", "gtfs:stop_name:FR-X": "Mairie" }), true);
+  assert.equal(sameName("Gare", { name: "Gare Routière" }), false);
+  assert.equal(sameName("Mairie", {}), false);
+});
+
+test("claimed: another stop has the ref or the name of the platform", () => {
+  const claimed = (tags) => matchStops(gtfs([["A", "77", "Mairie", "", 49.0, 1.0], ["B", "88", "Poste", "", 49.0004, 1.0]]), null, { n1: { version: "1", lat: 49.0001, lon: 1, tags } }).platforms.get("A")[0].claimed;
+  assert.equal(claimed({ name: "Autre" }), false);
+  assert.equal(claimed({ name: "Poste" }), true);
+  assert.equal(claimed({ name: "Autre", ref: "88" }), true);
+  assert.equal(claimed({ name: "Mairie" }), false);
+});

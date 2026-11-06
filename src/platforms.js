@@ -302,20 +302,31 @@ function verified(candidate, segment, road = null, side = null) {
   return d <= settings.thresholds.platform_road_m;
 }
 
-const best = (candidates, ref) => minBy(candidates, (c) => [c.holder ? 0 : c.byRef ? 1 : 2, dist(ref, c.pos)]) ?? null;
+const nearest = (candidates, ref) => minBy(candidates, (c) => dist(ref, c.pos)) ?? null;
+const hasItsRef = (c) => c.holder || c.byRef;
 
-/** Candidate OSM platform on the kerb side rather than across the road: the one already carrying the stop_id in OSM,
- * else the one with its code as a ref, else the nearest to the GTFS stop, or to the stop_position (spotPos) when they all have the same name. Unverified far
- * candidates are left out. null without candidates. */
+/** The OSM platform of a stop, on the kerb side of the road, or null to create one:
+ * 1. the one with its ref: carrying its stop_id, else with its code as a ref, the nearest;
+ * 2. else the one with its name, the nearest to the GTFS stop, or to the stop_position (spotPos), more accurate;
+ * 3. else one very close (thresholds.platform_unclaimed_m), whatever its name, that no other stop has the ref or the name of: a second platform would duplicate it. The caller reports it.
+ * Unverified far candidates are left out. Without a segment, the side is not judged. */
 export function choosePlatform(candidates, stop, { segment = null, spotPos = null, road = null, side = null } = {}) {
-  let usable = candidates.filter((c) => verified(c, segment, road, side));
-  let ref = stop;
-  if (segment) {
-    const kerb = usable.filter((c) => onKerb(c.pos, segment, side));
-    if (kerb.length) usable = kerb;
-    if (spotPos && new Set(usable.map((c) => c.name)).size === 1) ref = spotPos;
+  const usable = candidates.filter((c) => verified(c, segment, road, side) && (!segment || onKerb(c.pos, segment, side)));
+  const ofRef = usable.filter(hasItsRef);
+  if (ofRef.length) {
+    const holders = ofRef.filter((c) => c.holder);
+    return nearest(holders.length ? holders : ofRef, stop);
   }
-  return best(usable, ref);
+  const named = usable.filter((c) => c.sameName);
+  if (named.length) return nearest(named, segment && spotPos ? spotPos : stop);
+  return nearest(usable.filter((c) => !c.claimed && dist(stop, c.pos) <= settings.thresholds.platform_unclaimed_m), stop);
+}
+
+/** The platform across the road with the ref or the name of the stop: a single pole for both directions, when no other stop stands on that side. */
+function poleAcross(candidates, stop, segment, road, side) {
+  const own = candidates.filter((c) => verified(c, segment, road, side) && (hasItsRef(c) || c.sameName));
+  const rank = (c) => (c.holder ? 0 : c.byRef ? 1 : 2);
+  return minBy(own, (c) => [rank(c), dist(stop, c.pos)]) ?? null;
 }
 
 /** Is this OSM platform, on the kerb side, the one of stopId rather than of the stop opposite? Yes if it carries the stop_id of stopId, then if only stopId has its code as a ref, or, with
@@ -330,22 +341,29 @@ function ownsKerb(platform, stopId, opposite, stops, segment, side) {
   return dist(platform.pos, pos(stopId)) < dist(platform.pos, pos(opposite));
 }
 
-/** [platform, GTFS stop_id whose data it takes]. When the GTFS attaches the route to the stop across the road, the other
- * GTFS platform of the same stop on the kerb side is used: its OSM platform on that side, else the chosen platform if on
- * that side, else null (a platform is created at its position). Unchanged when the stop is already on the kerb side, when its
- * OSM platform is (see ownsKerb), when it has no platform and is too close to the road for its side to mean anything
- * (thresholds.side_doubt_m), or when the GTFS has no platform on that side. */
+/** [platform, GTFS stop_id whose data it takes]. The platform with the ref of the stop is across the road, or the GTFS attaches the route to the stop across the road:
+ * the other GTFS platform of the same stop on the kerb side is used, with its OSM platform on that side (see choosePlatform), else the chosen platform if on that side, else null (a platform
+ * is created at its position). Without a stop opposite in the GTFS, the stop stays itself. Also unchanged when its OSM platform is on the kerb side (see ownsKerb), or when it has no platform and
+ * is too close to the road for its side to mean anything (thresholds.side_doubt_m). A stop that stays itself without a platform, with no stop nearby on the other side, takes its pole across the road (see poleAcross). */
 export function fixSide(stopId, platform, segment, stops, road = null, side = null) {
   if (!segment) return [platform, stopId];
   const pos = (id) => latlon(stops.df.get(id));
   const kerb = (p) => kerbSide(p, ...segment); // GTFS stops: on the segment of the stop
-  if (kerb(pos(stopId))) return [platform, stopId];
-  const opposite = minBy((stops.neighbours.get(stopId) || []).filter((id) => kerb(pos(id))), (id) => dist(pos(id), pos(stopId)));
-  if (opposite === undefined) return [platform, stopId];
-  if (platform ? ownsKerb(platform, stopId, opposite, stops, segment, side) : lineDistance(pos(stopId), ...segment) <= settings.thresholds.side_doubt_m) return [platform, stopId];
-  let candidates = (stops.platforms.get(opposite) || []).filter((c) => onKerb(c.pos, segment, side) && verified(c, segment, road, side));
-  if (!candidates.length && platform && onKerb(platform.pos, segment, side)) candidates = [platform];
-  return [best(candidates, pos(opposite)), opposite];
+  const candidates = stops.platforms.get(stopId) || [];
+  const withRef = candidates.filter(hasItsRef);
+  const refAcross = withRef.length > 0 && !withRef.some((c) => onKerb(c.pos, segment, side));
+  const staying = () => {
+    const alone = !(stops.rivals?.get(stopId) || []).some((id) => kerb(pos(id)) !== kerb(pos(stopId)));
+    return [platform ?? (alone ? poleAcross(candidates, pos(stopId), segment, road, side) : null), stopId];
+  };
+  if (!refAcross && kerb(pos(stopId))) return staying();
+  const neighbours = stops.neighbours.get(stopId) || [];
+  const onThisSide = neighbours.filter((id) => kerb(pos(id)));
+  const opposite = minBy(refAcross && !onThisSide.length ? neighbours : onThisSide, (id) => dist(pos(id), pos(stopId)));
+  if (opposite === undefined) return staying();
+  if (!refAcross && (platform ? ownsKerb(platform, stopId, opposite, stops, segment, side) : lineDistance(pos(stopId), ...segment) <= settings.thresholds.side_doubt_m)) return staying();
+  const theirs = choosePlatform(stops.platforms.get(opposite) || [], pos(opposite), { segment, road, side });
+  return [theirs ?? (platform && onKerb(platform.pos, segment, side) ? platform : null), opposite];
 }
 
 // --- tags -------------------------------------------------------------------------------------------------
