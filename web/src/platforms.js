@@ -302,10 +302,10 @@ function verified(candidate, segment, road = null, side = null) {
   return d <= settings.thresholds.platform_road_m;
 }
 
-const best = (candidates, ref) => minBy(candidates, (c) => [c.holder ? 0 : 1, dist(ref, c.pos)]) ?? null;
+const best = (candidates, ref) => minBy(candidates, (c) => [c.holder ? 0 : c.byRef ? 1 : 2, dist(ref, c.pos)]) ?? null;
 
 /** Candidate OSM platform on the kerb side rather than across the road: the one already carrying the stop_id in OSM,
- * else the nearest to the GTFS stop, or to the stop_position (spotPos) when they all have the same name. Unverified far
+ * else the one with its code as a ref, else the nearest to the GTFS stop, or to the stop_position (spotPos) when they all have the same name. Unverified far
  * candidates are left out. null without candidates. */
 export function choosePlatform(candidates, stop, { segment = null, spotPos = null, road = null, side = null } = {}) {
   let usable = candidates.filter((c) => verified(c, segment, road, side));
@@ -318,12 +318,14 @@ export function choosePlatform(candidates, stop, { segment = null, spotPos = nul
   return best(usable, ref);
 }
 
-/** Is this OSM platform, on the kerb side, the one of stopId rather than of the stop opposite? Yes if it carries the stop_id of stopId, or, carrying
- * neither, if it is closer to stopId: the GTFS position is then what is wrong, as at a bus station whose bays only differ by a letter. */
+/** Is this OSM platform, on the kerb side, the one of stopId rather than of the stop opposite? Yes if it carries the stop_id of stopId, then if only stopId has its code as a ref, or, with
+ * nothing to tell them apart, if it is closer to stopId: the GTFS position is then what is wrong, as at a bus station whose bays only differ by a letter. */
 function ownsKerb(platform, stopId, opposite, stops, segment, side) {
   if (!onKerb(platform.pos, segment, side)) return false;
   if (platform.holder) return true;
   if (stops.holders?.get(opposite)?.has(platform.id)) return false;
+  const [mine, theirs] = [stopId, opposite].map((id) => Boolean(stops.refHolders?.get(id)?.has(platform.id)));
+  if (mine !== theirs) return mine;
   const pos = (id) => latlon(stops.df.get(id));
   return dist(platform.pos, pos(stopId)) < dist(platform.pos, pos(opposite));
 }
@@ -473,7 +475,7 @@ function uniqueOwners(owners, stops, assignments) {
   for (const [key, ids] of onPlatform) {
     if (ids.length < 2) continue;
     const owner = key.split("\u0001")[0];
-    const keep = minBy(ids, (id) => [assignments.get(id).get(owner)[3] === true ? 0 : 1, stops.holders.get(id)?.has(owner) ? 0 : 1, dist(latlon(stops.df.get(id)), assignments.get(id).get(owner)[1])]);
+    const keep = minBy(ids, (id) => [assignments.get(id).get(owner)[3] === true ? 0 : 1, stops.holders.get(id)?.has(owner) ? 0 : 1, stops.refHolders?.get(id)?.has(owner) ? 0 : 1, dist(latlon(stops.df.get(id)), assignments.get(id).get(owner)[1])]);
     for (const id of ids) {
       if (id === keep) continue;
       owners.set(id, null);

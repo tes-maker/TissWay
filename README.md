@@ -99,7 +99,8 @@ lines converted go in the file corrected, even a relation of the line that no va
 ### Platforms
 
 - The platform is picked on the kerb side of the way in the direction of travel. Prefer the OSM platform
-  already carrying the `stop_id`, else the nearest candidate. Without a candidate, a platform is created
+  already carrying the `stop_id` (within 100 m), else the one whose `ref`, `ref:*` or `gtfs:stop_code` is the code of the stop
+  (within 50 m, "Stop -> platform with its ref" in Settings), else the nearest candidate. Without a candidate, a platform is created
   at the GTFS position.
 - The side of an OSM platform is judged on the segment of the road next to it, not on the prolongation
   of the segment of the stop (bends). A lay-by the route passes through (an unnamed or `service` way

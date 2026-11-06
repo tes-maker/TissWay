@@ -634,3 +634,21 @@ test("stop_refs_from_gtfs off: the codes of the GTFS are not written, the ref of
   enrich(obj, "n1", tags);
   assert.equal(obj.get("n1").tags.ref, "GOOD");
 });
+
+test("choosePlatform: its stop_id, then its ref, then the nearest; the kerb side first", () => {
+  const stop = [49.0005, EAST];
+  const at = (id, lat, lon, more = {}) => ({ id, pos: [lat, lon], name: id, holder: false, byRef: false, far: false, ...more });
+  const near = at("near", 49.0005, EAST), byRef = at("byRef", 49.0007, EAST, { byRef: true }), holder = at("holder", 49.0008, EAST, { holder: true });
+  assert.equal(choosePlatform([near, byRef], stop, { segment: SEGMENT }).id, "byRef");
+  assert.equal(choosePlatform([near, byRef, holder], stop, { segment: SEGMENT }).id, "holder");
+  assert.equal(choosePlatform([near, at("across", 49.0005, WEST, { byRef: true })], stop, { segment: SEGMENT }).id, "near");
+  assert.equal(choosePlatform([at("far", 49.0005, WEST, { byRef: true, far: true })], stop, { segment: SEGMENT }), null);
+});
+
+test("fixSide: a platform with the ref of this stop only stays its own, even closer to the stop across", () => {
+  const platform = { id: "nP", pos: [49.0005, EAST], name: "X", holder: false, byRef: true };
+  const stopsWith = (refHolders) => new Stops(new Map([["A", gtfsStop("A", "10A", 49.0005, WEST)], ["B", gtfsStop("B", "10B", 49.0005, EAST)]]), new Map([["A", [platform]], ["B", []]]), new Map([["A", ["B"]], ["B", ["A"]]]), new Map(), new Map(), new Map(Object.entries(refHolders).map(([k, v]) => [k, new Set(v)])));
+  assert.equal(fixSide("A", platform, SEGMENT, stopsWith({ A: ["nP"] }))[1], "A");
+  assert.equal(fixSide("A", platform, SEGMENT, stopsWith({ A: ["nP"], B: ["nP"] }))[1], "B"); // both: nothing told apart, the nearest
+  assert.equal(fixSide("A", { ...platform, byRef: false }, SEGMENT, stopsWith({ B: ["nP"] }))[1], "B");
+});

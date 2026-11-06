@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import "./helpers.js";
+import { settings } from "../src/settings.js";
 import { matchStops, siblingCode } from "../src/stops.js";
 
 test("siblingCode", () => {
@@ -59,4 +60,32 @@ test("far platform closer to a stop of the same name", () => {
   const s = matchStops(gtfs([["J0", "", "Jules Ferry", "", 49.468174, 1.044779], ["J1", "", "Jules Ferry", "", 49.468505, 1.044659]]), null,
     osm([["n19", "Jules Ferry", "platform", null, 49.4688143, 1.0444221], ["n20", "Jules Ferry", "platform", null, 49.4686988, 1.0443729]]));
   assert.deepEqual(s.platforms.get("J0").map((c) => c.id).sort(), ["n19", "n20"]);
+});
+
+const platformAt = (lat, tags) => ({ version: "1", lat, lon: 1, tags: { name: "Poste", ...tags } });
+
+test("a platform with the code of the stop as a ref: a candidate up to ref_m, even with another name and a closer stop", () => {
+  // Poste is 16 m from the platform, Mairie 40 m: without its ref, the platform is left to Poste
+  const stops = gtfs([["A", "77", "Mairie", "", 49.0, 1.0], ["B", "88", "Poste", "", 49.0005, 1.0]]);
+  const candidates = (tags, lat = 49.00036) => matchStops(stops, null, { n1: platformAt(lat, tags) }).platforms.get("A").map((c) => [c.id, c.byRef, c.far]);
+  assert.deepEqual(candidates({}), []);
+  for (const tags of [{ ref: "77" }, { "ref:Twisto": "77" }, { ref: "9;77" }, { "gtfs:stop_code:FR-X": "77" }]) assert.deepEqual(candidates(tags), [["n1", true, true]], JSON.stringify(tags));
+  assert.deepEqual(candidates({ ref: "78" }), []);
+  assert.deepEqual(candidates({ local_ref: "77" }), []);
+  assert.deepEqual(candidates({ ref: "77" }, 49.00054), []); // 60 m: too far
+  settings.thresholds.ref_m = 70;
+  assert.deepEqual(candidates({ ref: "77" }, 49.00054), [["n1", true, true]]);
+  settings.thresholds.ref_m = 0;
+  assert.deepEqual(candidates({ ref: "77" }), []);
+});
+
+test("the code in a NeTEx stop_id counts as a ref; with the codes of the GTFS not trusted, only the stop_id", () => {
+  const stops = gtfs([["FR:14:ZE:abc:1", "77", "Mairie", "", 49.0, 1.0]]);
+  const refHolders = (ref) => [...(matchStops(stops, null, { n1: platformAt(49.00036, { ref }) }).refHolders.get("FR:14:ZE:abc:1") ?? [])];
+  assert.deepEqual(refHolders("abc"), ["n1"]);
+  assert.deepEqual(refHolders("77"), ["n1"]);
+  settings.stop_refs_from_gtfs = false;
+  assert.deepEqual(refHolders("abc"), []);
+  assert.deepEqual(refHolders("77"), []);
+  assert.deepEqual(refHolders("FR:14:ZE:abc:1"), ["n1"]);
 });
