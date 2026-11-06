@@ -318,10 +318,21 @@ export function choosePlatform(candidates, stop, { segment = null, spotPos = nul
   return best(usable, ref);
 }
 
+/** Is this OSM platform, on the kerb side, the one of stopId rather than of the stop opposite? Yes if it carries the stop_id of stopId, or, carrying
+ * neither, if it is closer to stopId: the GTFS position is then what is wrong, as at a bus station whose bays only differ by a letter. */
+function ownsKerb(platform, stopId, opposite, stops, segment, side) {
+  if (!onKerb(platform.pos, segment, side)) return false;
+  if (platform.holder) return true;
+  if (stops.holders?.get(opposite)?.has(platform.id)) return false;
+  const pos = (id) => latlon(stops.df.get(id));
+  return dist(platform.pos, pos(stopId)) < dist(platform.pos, pos(opposite));
+}
+
 /** [platform, GTFS stop_id whose data it takes]. When the GTFS attaches the route to the stop across the road, the other
  * GTFS platform of the same stop on the kerb side is used: its OSM platform on that side, else the chosen platform if on
- * that side, else null (a platform is created at its position). Unchanged when the stop is already on the kerb side or
- * when the GTFS has no platform on that side. */
+ * that side, else null (a platform is created at its position). Unchanged when the stop is already on the kerb side, when its
+ * OSM platform is (see ownsKerb), when it has no platform and is too close to the road for its side to mean anything
+ * (thresholds.side_doubt_m), or when the GTFS has no platform on that side. */
 export function fixSide(stopId, platform, segment, stops, road = null, side = null) {
   if (!segment) return [platform, stopId];
   const pos = (id) => latlon(stops.df.get(id));
@@ -329,6 +340,7 @@ export function fixSide(stopId, platform, segment, stops, road = null, side = nu
   if (kerb(pos(stopId))) return [platform, stopId];
   const opposite = minBy((stops.neighbours.get(stopId) || []).filter((id) => kerb(pos(id))), (id) => dist(pos(id), pos(stopId)));
   if (opposite === undefined) return [platform, stopId];
+  if (platform ? ownsKerb(platform, stopId, opposite, stops, segment, side) : lineDistance(pos(stopId), ...segment) <= settings.thresholds.side_doubt_m) return [platform, stopId];
   let candidates = (stops.platforms.get(opposite) || []).filter((c) => onKerb(c.pos, segment, side) && verified(c, segment, road, side));
   if (!candidates.length && platform && onKerb(platform.pos, segment, side)) candidates = [platform];
   return [best(candidates, pos(opposite)), opposite];
@@ -360,6 +372,12 @@ export function stopTags(stop, stopId, network, mode = "bus") {
   if (stop.platform_code) tags.local_ref = stop.platform_code;
   if (stop.wheelchair_boarding === "1" || stop.wheelchair_boarding === "2") tags.wheelchair = stop.wheelchair_boarding === "1" ? "yes" : "no";
   return tags;
+}
+
+/** Stops of these variants whose OSM platform carries their stop_id, but which no relation uses: the run gave them to another stop (fixSide). */
+export function lostStops(variants, stops, assignments) {
+  const ids = new Set(variants.flatMap((v) => v.seq));
+  return [...ids].filter((id) => stops.holders.get(id)?.size && !assignments.has(id));
 }
 
 /** Set the GTFS data on the platforms chosen by the routes (assignments: stop_id -> Map platform -> [network tags, position, mode]). A stop_id

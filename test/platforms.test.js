@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { approx } from "./helpers.js";
 import { buildLine } from "../src/build.js";
 import { Store } from "../src/osm.js";
-import { stopPositionOnly, choosePlatform, completeRouteRef, enrich, filterRoadPlatforms, fixSide, forward, kerbSide, layBy, locateStop, makeSpot, materialize,
+import { stopPositionOnly, choosePlatform, completeRouteRef, enrich, filterRoadPlatforms, fixSide, forward, kerbSide, layBy, locateStop, lostStops, makeSpot, materialize,
   roadDistance, setStopPositionTags, sideSegment, stopPositionTags, stopRef, stopSegment, stopTags, tagPlatforms, travelSegment } from "../src/platforms.js";
 import { settings } from "../src/settings.js";
 import { Stops } from "../src/stops.js";
@@ -220,6 +220,53 @@ test("fixSide takes the sibling on the kerb side", () => {
   });
   const [platform, dataId] = fixSide("A", s.platforms.get("A")[0], SEGMENT, s);
   assert.deepEqual([platform.id, dataId], ["nPB", "B"]);
+});
+
+test("fixSide keeps a stop whose OSM platform carries its stop_id on the kerb side, wherever the GTFS puts it", () => {
+  const s = makeStops([gtfsStop("A", "10A", 49.0005, WEST), gtfsStop("B", "10B", 49.0007, EAST)], {
+    neighbours: { A: ["B"], B: ["A"] },
+    platforms: { A: [{ id: "nPA", pos: [49.0005, EAST], name: "Hopital", holder: true }], B: [{ id: "nPB", pos: [49.0007, EAST], name: "Hopital", holder: true }] },
+  });
+  const [platform, dataId] = fixSide("A", s.platforms.get("A")[0], SEGMENT, s);
+  assert.deepEqual([platform.id, dataId], ["nPA", "A"]);
+});
+
+test("fixSide still swaps when the platform carrying the stop_id is across the road", () => {
+  const s = makeStops([gtfsStop("A", "10A", 49.0005, WEST), gtfsStop("B", "10B", 49.0005, EAST)], {
+    neighbours: { A: ["B"], B: ["A"] },
+    platforms: { A: [{ id: "nPA", pos: [49.0005, WEST], name: "Hopital", holder: true }], B: [{ id: "nPB", pos: [49.0005, EAST], name: "Hopital", holder: true }] },
+  });
+  const [platform, dataId] = fixSide("A", s.platforms.get("A")[0], SEGMENT, s);
+  assert.deepEqual([platform.id, dataId], ["nPB", "B"]);
+});
+
+test("fixSide keeps a platform on the kerb side closer to the stop, without any stop_id", () => {
+  const s = makeStops([gtfsStop("A", "10A", 49.0005, WEST), gtfsStop("B", "10B", 49.0009, EAST)], {
+    neighbours: { A: ["B"], B: ["A"] },
+    platforms: { A: [{ id: "nPA", pos: [49.0005, EAST], name: "Hopital", holder: false }], B: [{ id: "nPB", pos: [49.0009, EAST], name: "Hopital", holder: false }] },
+  });
+  assert.deepEqual(fixSide("A", s.platforms.get("A")[0], SEGMENT, s).map((x) => x.id ?? x), ["nPA", "A"]);
+});
+
+test("fixSide leaves to the opposite stop a kerb platform closer to it, or carrying its stop_id", () => {
+  const near = { id: "nPB", pos: [49.0005, EAST], name: "Hopital", holder: false };
+  const stopsOf = (bLat, holders = {}) => makeStops([gtfsStop("A", "10A", 49.0005, WEST), gtfsStop("B", "10B", bLat, EAST)], {
+    neighbours: { A: ["B"], B: ["A"] }, platforms: { A: [near], B: [near] }, holders,
+  });
+  assert.equal(fixSide("A", near, SEGMENT, stopsOf(49.0005))[1], "B");
+  assert.equal(fixSide("A", near, SEGMENT, stopsOf(49.0009, { B: ["nPB"] }))[1], "B");
+});
+
+test("fixSide: without a platform, a stop on the road is kept, one clearly across is replaced", () => {
+  const stopsAt = (lon) => makeStops([gtfsStop("A", "10A", 49.0005, lon), gtfsStop("B", "10B", 49.0005, EAST)], { neighbours: { A: ["B"], B: ["A"] } });
+  assert.deepEqual(fixSide("A", null, SEGMENT, stopsAt(1.0 - 0.00001)), [null, "A"]); // < 1 m west of the road
+  assert.equal(fixSide("A", null, SEGMENT, stopsAt(WEST))[1], "B");
+});
+
+test("lostStops: a stop carried by OSM and served, that no relation uses", () => {
+  const stops = { holders: new Map([["A", new Set(["n1"])], ["B", new Set(["n2"])]]) };
+  const variants = [{ seq: ["A", "B", "C"] }];
+  assert.deepEqual(lostStops(variants, stops, new Map([["B", new Map()]])), ["A"]);
 });
 
 test("fixSide without sibling changes nothing", () => {
