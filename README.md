@@ -49,8 +49,9 @@ The Activity log says which variants were routed through their stops.
 Each stop gets a stop_position on the travelled way, in front of the existing OSM platform used (GTFS
 coordinates are often tens of metres off), else at the projection of the GTFS stop:
 
-- **each platform takes the nearest existing stop_position** (within `stop_position_reuse_m`), the closest pairs first, a stop_position going to one platform only, when the trace passes there.
-  A platform with the `stop_id` or the `ref` of a stop of which another platform is used is a duplicate, and takes none;
+- **each platform takes an existing stop_position** (within `stop_position_reuse_m`), a stop_position going to one platform only, when the trace passes there: first the one with its
+  `local_ref` (the `platform_code` of the GTFS for a stop without a platform), then the nearest, the closest pairs first. One with another `local_ref` is never its own. An area and a node with the
+  same `ref` are one platform drawn twice: the area, nearest by either. A platform with the `stop_id` or the `ref` of a stop of which another platform is used is a duplicate, and takes none;
 - otherwise, in front of an existing OSM platform, the existing stop_position nearest to that platform is reused
   (within `stop_position_reuse_m` of its projection on the way), unless it is clearly closer to the
   platform of the stop across the road;
@@ -68,7 +69,7 @@ coordinates are often tens of metres off), else at the projection of the GTFS st
 - stops facing each other (projections within `stop_position_shared_m`) share one stop_position, and
   same-name stops on the same kerb are treated as one platform (aggregated feeds list the same platform
   under several networks);
-- a stop_position only carries `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`, and `coach=yes` for coaches) and `name`, the name of the stop. What an existing one has
+- a stop_position only carries `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`, and `coach=yes` for coaches), `name`, the name of the stop, and its `local_ref` if it has one. What an existing one has
   more goes to its platform when the platform lacks it (`shelter`, `bench`…; its `ref` and ids only if it serves a single stop), and `direction` and `highway=bus_stop` are dropped. What
   describes something else on the node stays: `highway=traffic_signals`, `crossing`, `barrier`, `note`… A stop_position is shared by every route on that way, whatever its network.
 
@@ -80,7 +81,7 @@ and reads the stops and relations from OSM, the GTFS giving the networks and the
 - **Stops** of its route relations: `name` without the town, `official_name` with it, punctuation, `bus=yes` on the platforms of bus and coach lines, a missing `public_transport=platform`, or `highway` on a line on the road, GTFS ids and
   numbered network tags tidied. Opposite stops of one name (within 200 m) get the same `official_name`. 
 - **Route and route_master relations**: `name`, `from`, `to`, `via`. The start of a name stays as it is (`Car Nomad 224:`), unless it was changed in Settings; stops told apart in a title stay.
-- **Stop_position and platform mixed up**: a stop_position keeps only its vehicle and `name`, the rest going to its platform. An object whose tag and role disagree, or without a tag, is judged by
+- **Stop_position and platform mixed up**: a stop_position keeps only its vehicle, `name` and `local_ref`, the rest going to its platform. An object whose tag and role disagree, or without a tag, is judged by
   where it stands: on the road a stop_position, beside it a platform. Its tag and its role in the relations are put right.
 - **Never changed**: ways, the order of the members, positions. What is already right stays out of the file, so that it can be run again.
 
@@ -104,7 +105,8 @@ lines converted go in the file corrected, even a relation of the line that no va
 ### Bus stations
 
 A name with at least 3 platforms with a `ref` nearby is a bus station: its stops are bays. Each one takes the platform with its `ref`, whatever the side of the road, and no bay stands for another, nor is across the road from another.
-No `amenity=bus_station` is needed. A bay drawn as a way goes before a stray node with the same `stop_id`, and a platform holding this stop alone before one holding two.
+No `amenity=bus_station` is needed. The platform of a stop is first an area with a node of the same `ref` within 30 m (the same platform drawn twice), then the one carrying its `stop_id`, then its `ref`.
+A platform holding this stop alone comes before one holding two, and an area before a stray node.
 
 ### Platforms
 
