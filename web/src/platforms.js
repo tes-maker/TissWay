@@ -18,8 +18,8 @@
 // - the platform is chosen on the kerb side of the way (settings.driving_side) in the direction of travel, judged
 //   on the road segment next to the platform (sideSegment), and for the GTFS stop on its segment (stopSegment);
 // - a platform found with the extended reach is only used on the kerb side and next to the way (verified);
-// - when the GTFS attaches the route to the opposite platform (a common error), the data of the other GTFS platform
-//   of the same stop is used instead (fixSide);
+// - when the GTFS attaches the route to the opposite platform (a common error), the other GTFS platform of the same stop is used instead, with its OSM
+//   platform (fixSide); a platform created takes only the GTFS stop of the route, its position and its data;
 // - a GTFS stop_id is set on a single OSM platform (tagPlatforms), even when the GTFS has a single stop for both
 //   directions;
 // - tags of another network are never overwritten: ref belongs to the network owning the stop, the others use ref:<network> (enrich).
@@ -451,7 +451,7 @@ export function tagPlatforms(obj, stops, assignments, { sizes = null, ofStop = n
         const codes = new Set([...removed].map((v) => stops.df.get(v)?.stop_code).filter(Boolean));
         if (codes.size) removeStopIds(obj.get(p).tags, ["gtfs:stop_code"], (v) => codes.has(v));
       }
-      if (isNew(p)) obj.get(p).tags = { ...tags, ...obj.get(p).tags };
+      if (isNew(p)) obj.get(p).tags = tags; // created: the GTFS only
       else enrich(obj, p, tags, sizes, ofStop);
     }
   }
@@ -763,12 +763,13 @@ export function takeFromStopPosition(t, moved, exclusive = false) {
   for (const [k, v] of Object.entries(moved)) if (!(k in t) && (exclusive || !STOP_IDENTITY.test(k))) t[k] = v;
 }
 
-/** The tags of an existing OSM stop_position, see stopPositionOnly. into: {platform, exclusive}, where what it should not have goes. */
+/** The tags of an existing OSM stop_position, see stopPositionOnly. into: {platform, exclusive}, where what it should not have goes; a platform created takes nothing from it, and it keeps what it has. */
 export function setStopPositionTags(obj, key, name, vehicle = "bus", into = null) {
   const old = obj.get(key).tags;
   const { tags, moved } = stopPositionOnly(old, name, [vehicle]);
+  if (into?.platform && isNew(into.platform)) Object.assign(tags, moved); // a platform created only takes the GTFS: what the stop_position has more stays on it
   if (!sameTags(old, tags)) obj.edit(key).tags = tags;
-  if (!into?.platform || !obj.has(into.platform)) return;
+  if (!into?.platform || !obj.has(into.platform) || isNew(into.platform)) return;
   const taken = { ...obj.get(into.platform).tags };
   takeFromStopPosition(taken, moved, into.exclusive);
   if (!sameTags(taken, obj.get(into.platform).tags)) obj.edit(into.platform).tags = taken;

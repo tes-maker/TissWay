@@ -70,7 +70,7 @@ coordinates are often tens of metres off), else at the projection of the GTFS st
   same-name stops on the same kerb are treated as one platform (aggregated feeds list the same platform
   under several networks);
 - a stop_position only carries `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`, and `coach=yes` for coaches), `name`, the name of the stop, and its `local_ref` if it has one. What an existing one has
-  more goes to its platform when the platform lacks it (`shelter`, `bench`…; its `ref` and ids only if it serves a single stop), and `direction` and `highway=bus_stop` are dropped. What
+  more goes to its platform when the platform lacks it (a platform created takes nothing from it: the stop_position keeps it) (`shelter`, `bench`…; its `ref` and ids only if it serves a single stop), and `direction` and `highway=bus_stop` are dropped. What
   describes something else on the node stays: `highway=traffic_signals`, `crossing`, `barrier`, `note`… A stop_position is shared by every route on that way, whatever its network.
 
 ### Correcting a whole network
@@ -115,7 +115,7 @@ A platform holding this stop alone comes before one holding two, and an area bef
   `stop_id` (within 100 m), else the one whose `ref`, `ref:*` or `gtfs:stop_code` is the code of the stop (within `ref_m`, 150 m; beyond 30 m, it must be on the kerb side and next to the way). If it is
   across the road, the stop opposite in the GTFS is used. Else the platform with the name of the stop (within 100 m), else one within
   15 m that no other stop has the ref or the name of (reported to check). With no stop nearby on the other side, its platform across the
-  road is kept (single pole, reported). Otherwise a platform is created at the GTFS position.
+  road is kept (single pole, reported). Otherwise a platform is created from the GTFS only: the stop of the route as it is, at its position and with its data, even when it stands across the road (reported), never the stop opposite.
 - The side of an OSM platform is judged on the segment of the road next to it, not on the prolongation
   of the segment of the stop (bends). A lay-by the route passes through (an unnamed or `service` way
   between two ways of the same road) does not count, unless the vehicle stops in it. The side of a GTFS
