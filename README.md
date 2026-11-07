@@ -193,8 +193,7 @@ They follow the OSM wiki's [Public transport](https://wiki.openstreetmap.org/wik
   `gtfs:shape_id` (when matched from the shape). Every `gtfs:*` key carries the `:<feed>` suffix when a feed code is known.
 - **route_master**: `type=route_master`, `route_master=<mode>`, `ref`, `name`, network, colours, `gtfs:route_id`.
 - **platform**: `public_transport=platform`, `highway=bus_stop` on a node (`highway=platform` on a way), `bus=yes` for a bus or a coach (iD reports a `highway=bus_stop` without it as incomplete; an existing `bus=no` stays), `trolleybus=yes` or `coach=yes` for these lines,
-  `name`, network, `gtfs:stop_id`, `gtfs:stop_name`, `gtfs:stop_code` (only when no ref holds that code), `ref` (stop_code, or the code of a NeTEx-style stop_id when OSM
-  platforms already follow this), `local_ref` (platform_code), `wheelchair`. An existing `route_ref` gets the line.
+  `name`, network, `gtfs:stop_id`, `gtfs:stop_name`, `gtfs:stop_code` (only when no ref holds that code), `ref` (stop_code, else the code of a NeTEx-style stop_id, "FR:0:ZE:ESxBIO:ATOUMOD080" giving "ESxBIO", else the whole stop_id), `local_ref` (platform_code), `wheelchair`. An existing `route_ref` gets the line.
 - **stop_position**: only `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`, and `coach=yes` for coaches) and `name`, see above.
 
 The network tags are `network`, `network:wikidata` and `network:wikipedia`, found in the existing OSM relations of the lines, else on

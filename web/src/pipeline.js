@@ -12,7 +12,7 @@
 // 7. a single .osm text is written (objects shared between lines: no conflict on upload).
 
 import { buildLine } from "./build.js";
-import { detectRefFromStopId, detectStopRefTags, feedCodeOf, networkFromOsm } from "./detect.js";
+import { detectStopRefTags, feedCodeOf, networkFromOsm } from "./detect.js";
 import { ExistingRoutes, WIKI_KEYS } from "./existing.js";
 import { bbox, inBbox, latlon } from "./geo.js";
 import { lineVariants, refSortKey, stopSequences } from "./gtfs.js";
@@ -248,10 +248,6 @@ async function prepareStops(feed, { allStops }, box, osmStops, detected) {
   }
   const area = allStops.filter((s) => inBbox(latlon(s), box)).map((s) => ({ ...s, stop_name: cleanStopName(s.stop_name) }));
   const stops = matchStops(area, await feed.stopAgencies(), osmStops);
-  if (settings.ref_from_stop_id === "auto" && settings.stop_refs_from_gtfs) {
-    settings.ref_from_stop_id = detectRefFromStopId(stops, osmStops);
-    if (settings.ref_from_stop_id) detected.push(["Platform ref", "code of the NeTEx stop_id"]);
-  }
   await pairStops(stops, box, osmStops);
   return stops;
 }

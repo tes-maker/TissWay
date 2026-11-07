@@ -63,16 +63,6 @@ export function detectStopRefTags(osm, stopIds) {
   return found.filter((key) => !found.some((other) => key.startsWith(`${other}:`))); // "ref:FR:Atoumod:Nomad" is "ref:FR:Atoumod" for a second network
 }
 
-/** Do OSM platforms near the stops carry the code of a NeTEx-style stop_id as their ref? */
-export function detectRefFromStopId(stops, osm) {
-  let hits = 0;
-  for (const [id, s] of stops.df) {
-    const code = !s.stop_code && CODE_IN_ID.exec(id)?.[1];
-    if (code && (stops.platforms.get(id) || []).some((c) => Object.entries(osm[c.id]?.tags ?? {}).some(([k, v]) => (k === "ref" || k.startsWith("ref:")) && v.split(";").includes(code)))) hits++;
-  }
-  return hits >= MIN_HITS;
-}
-
 /** network tag used in OSM for the lines of an agency, or null: the relations carrying their route_id, else those with the ref
  * of one of its lines whose network is the agency's name, or its first words ("Nomad" for "Nomad Car"). */
 export function networkFromOsm(name, routes, relations) {

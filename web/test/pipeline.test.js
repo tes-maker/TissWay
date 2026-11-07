@@ -151,7 +151,7 @@ test("runRoutes: a line from GTFS to .osm", async () => {
 
 test("runRoutes finds what is not in the GTFS online, with nothing configured", async () => {
   town = "Fleury-sur-Orne";
-  Object.assign(settings, { driving_side: "auto", fix_accents: true, network_auto: true, feed: "auto", ref_from_stop_id: "auto" });
+  Object.assign(settings, { driving_side: "auto", fix_accents: true, network_auto: true, feed: "auto" });
   const zip = { ...GTFS, "agency.txt": "agency_id,agency_name,agency_url,agency_lang\nAG,Bustown (Ville),https://bustown.example,FR\n" };
   const { xml, detected } = await runRoutes(await Feed.open(makeZip(zip)), { network: "Bustown", ref: "R1" });
   const found = Object.fromEntries(detected);

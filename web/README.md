@@ -35,7 +35,6 @@ for this run":
 | `network:wikidata`, `network:wikipedia` | The OSM relations of that network when at least 3 agree. Else Wikidata, only for an exact label that is confirmed by the agency's website, or that is a public transport system of the right country, and only when a single entry remains. Reported as a warning, to check. |
 | Suffix of the `gtfs:*` tags | The code OSM relations already use with the route_ids of this feed, around the lines, else over the feed's area. If none is found it stays empty, with a warning: PTNA then needs it from the wiki's List of GTFS feeds. |
 | Tags holding the stop_id (`ref:FR:Atoumod`) | `ref:*` tags of nearby platforms whose values are mostly GTFS stop_ids. |
-| Platform `ref` from a NeTEx stop_id | On when at least 3 nearby platforms already follow this. |
 | Driving side | Country of the stops (Nominatim), then its driving side (Wikidata). |
 | Town of every stop, for `official_name` and the titles | Nominatim, in the language of the feed. In France, always the commune: the commune nouvelle, never the commune déléguée in it nor the arrondissement. |
 | Accents | The spelling of OSM platforms of the same name, else Wiktionary (see limits below). |
