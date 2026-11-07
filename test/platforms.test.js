@@ -707,3 +707,8 @@ test("a platform taken with neither the ref nor the name of the stop is reported
   assert.equal(warnings(candidate({ sameName: true })).length, 0);
   assert.equal(warnings(candidate({ byRef: true })).length, 0);
 });
+
+test("a stop_position keeps its local_ref: it tells which bay it is", () => {
+  assert.deepEqual(stopPositionOnly({ public_transport: "stop_position", bus: "yes", local_ref: "C", ref: "14CAE09C" }, "Gare Routière").tags,
+    { public_transport: "stop_position", bus: "yes", local_ref: "C", name: "Gare Routière" });
+});

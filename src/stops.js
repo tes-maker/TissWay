@@ -8,7 +8,7 @@
 // - its rivals: the opposite stops and the stops of the same name nearby, one of which may own an existing
 //   stop_position on the road this stop's routes use (see platforms.locateStop).
 
-import { Grid, latlon, osmPosition } from "./geo.js";
+import { Grid, dist, latlon, osmPosition } from "./geo.js";
 import { nameKey, stopKey } from "./naming.js";
 import { CODE_IN_ID, choosePlatform, isStopPositionFor } from "./platforms.js";
 import { settings } from "./settings.js";
@@ -75,8 +75,9 @@ export class Stops {
 
 const BAYS = 3; // more platforms with a ref under one name than the two sides of a road
 
-/** Set stops.bays and stops.paired. Each OSM platform takes the nearest stop_position within stop_position_reuse_m, each of them for one platform only, the closest pairs first. A stop without a
- * platform of its own counts at its GTFS position: a stop_position is left to it, if nearest. A platform with the stop_id or the ref of a stop of which another platform was chosen is a duplicate, and does not count.
+/** Set stops.bays and stops.paired. Each OSM platform takes a stop_position within stop_position_reuse_m, each of them for one platform only: first one with its local_ref, then the nearest, the closest
+ * pairs first. One with another local_ref is never its own. An area and a node with the same ref are one platform: the area, nearest by either. A stop without a platform of its own counts at its GTFS
+ * position, its local_ref being its platform_code. A platform with the stop_id or the ref of a stop of which another platform was chosen is a duplicate, and does not count.
  * positions, osm: {key: object} of the stop_positions and of the OSM stops. */
 export function pairStopPositions(stops, positions, osm) {
   const byRef = new Map([...stops.df.keys()].map((id) => [id, stops.platformByRef(id)]));
@@ -87,15 +88,27 @@ export function pairStopPositions(stops, positions, osm) {
   }
   const chosen = new Set([...byRef.values()].filter(Boolean).map((c) => c.id));
   const holding = new Set([...stops.df.keys()].flatMap((id) => (stops.platforms.get(id) || []).filter((c) => c.holder || c.byRef).map((c) => c.id)));
+  const twins = twinsOf(osm), twinNodes = new Set(twins.values());
+  const localRef = (...keys) => keys.map((k) => osm[k]?.tags?.local_ref).find(Boolean) ?? null;
   const owners = [
-    ...osmPlatforms(osm).filter((p) => chosen.has(p.id) || !holding.has(p.id)).map((p) => [p.id, p.pos]),
-    ...[...stops.df].filter(([id]) => !(stops.platforms.get(id) || []).some((c) => c.holder || c.byRef || c.sameName)).map(([id, s]) => [id, latlon(s)]),
+    ...osmPlatforms(osm).filter((p) => !twinNodes.has(p.id) && (chosen.has(p.id) || !holding.has(p.id)))
+      .map((p) => [p.id, [p.pos, ...(twins.has(p.id) ? [osmPosition(osm[twins.get(p.id)])] : [])], localRef(p.id, twins.get(p.id))]),
+    ...[...stops.df].filter(([id]) => !(stops.platforms.get(id) || []).some((c) => c.holder || c.byRef || c.sameName)).map(([id, s]) => [id, [latlon(s)], s.platform_code || null]),
   ];
-  const nodes = Object.entries(positions).filter(([, o]) => o.lat !== undefined && isStopPositionFor(o.tags)).map(([k, o]) => [k, latlon(o)]);
+  const nodes = Object.entries(positions).filter(([, o]) => o.lat !== undefined && isStopPositionFor(o.tags)).map(([k, o]) => [k, latlon(o), o.tags.local_ref ?? null]);
   const reach = settings.thresholds.stop_position_reuse_m, grid = new Grid(nodes, ([, pos]) => pos, Math.max(reach, 1));
-  const pairs = owners.flatMap(([owner, pos]) => grid.within(pos, reach).map(([[node], d]) => [d, owner, node]));
+  const pairs = new Map(); // owner + node -> [same local_ref ? 0 : 1, distance, owner, node]
+  for (const [owner, points, ref] of owners) {
+    for (const point of points) {
+      for (const [[node, , nodeRef], d] of grid.within(point, reach)) {
+        if (ref && nodeRef && ref !== nodeRef) continue; // the stop_position of another bay
+        const k = `${owner}\u0001${node}`, rank = [ref && ref === nodeRef ? 0 : 1, d, owner, node];
+        if (!pairs.has(k) || d < pairs.get(k)[1]) pairs.set(k, rank);
+      }
+    }
+  }
   const used = new Set();
-  for (const [, owner, node] of sortedBy(pairs, ([d]) => d)) {
+  for (const [, , owner, node] of sortedBy([...pairs.values()], ([first, d]) => [first, d])) {
     if (stops.paired.has(owner) || used.has(node)) continue;
     stops.paired.set(owner, node);
     used.add(node);
@@ -135,6 +148,19 @@ function nameKeysOf(name) {
 function sameStopName(stopName, tags) {
   const keys = new Set(nameKeysOf(stopName ?? ""));
   return Object.entries(tags).some(([k, v]) => /^(?:name|official_name|gtfs:stop_name(?::.*)?)$/.test(k) && splitTag(v).some((name) => nameKeysOf(name).some((key) => keys.has(key))));
+}
+
+/** area -> node of the same platform: an area (a way) and a node within platform_m with a ref in common. Each node goes with its nearest area. */
+export function twinsOf(osm) {
+  const all = osmPlatforms(osm).map((p) => ({ ...p, refs: refsOf(osm[p.id].tags) })).filter((p) => p.refs.size);
+  const out = new Map(), taken = new Set();
+  const pairs = all.filter((a) => a.id[0] === "w").flatMap((a) => all.filter((n) => n.id[0] === "n" && [...n.refs].some((r) => a.refs.has(r))).map((n) => [dist(a.pos, n.pos), a.id, n.id]));
+  for (const [d, area, node] of sortedBy(pairs, ([d]) => d)) {
+    if (d > settings.thresholds.platform_m || out.has(area) || taken.has(node)) continue;
+    out.set(area, node);
+    taken.add(node);
+  }
+  return out;
 }
 
 /** OSM stops usable as platforms: nodes and ways, a stop_position (even tagged highway=bus_stop) never is. */
@@ -183,8 +209,10 @@ export function matchStops(stopRows, agencies, osm) {
     }
   }
 
+  const twins = twinsOf(osm);
   for (const [stopId, candidates] of platforms) {
     for (const c of candidates) {
+      c.twin = twins.get(c.id) ?? null; // an area with a node of the same ref: one platform drawn twice
       c.claimed = [...(claims.get(c.id) ?? [])].some((id) => id !== stopId);
       c.shared = [...holders].some(([id, keys]) => id !== stopId && df.has(id) && keys.has(c.id)); // it holds the stop_id of another stop as well
     }

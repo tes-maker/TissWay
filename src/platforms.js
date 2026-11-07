@@ -314,14 +314,14 @@ const nearest = (candidates, ref) => minBy(candidates, (c) => dist(ref, c.pos)) 
 const hasItsRef = (c) => c.holder || c.byRef;
 
 /** The OSM platform of a stop, on the kerb side of the road, or null to create one:
- * 1. the one with its ref: carrying its stop_id, then with its code as a ref, then holding no other stop, then drawn as a way (a stray node comes after the platform drawn), then the nearest;
+ * 1. the one with its ref: an area with a node of the same ref (one platform drawn twice, see stops.twinsOf), then carrying its stop_id, then with its code as a ref, then holding no other stop, then drawn as a way (a stray node comes after the platform drawn), then the nearest;
  * 2. else the one with its name, the nearest to the GTFS stop, or to the stop_position (spotPos), more accurate;
  * 3. else one very close (thresholds.platform_unclaimed_m), whatever its name, that no other stop has the ref or the name of: a second platform would duplicate it. The caller reports it.
  * Unverified far candidates are left out. Without a segment, the side is not judged. */
 export function choosePlatform(candidates, stop, { segment = null, spotPos = null, road = null, side = null } = {}) {
   const usable = candidates.filter((c) => verified(c, segment, road, side) && (!segment || onKerb(c.pos, segment, side)));
   const ofRef = usable.filter(hasItsRef);
-  if (ofRef.length) return minBy(ofRef, (c) => [c.holder ? 0 : 1, c.byRef ? 0 : 1, c.shared ? 1 : 0, c.id[0] === "w" ? 0 : 1, dist(stop, c.pos)]);
+  if (ofRef.length) return minBy(ofRef, (c) => [c.twin && c.byRef ? 0 : 1, c.holder ? 0 : 1, c.byRef ? 0 : 1, c.shared ? 1 : 0, c.id[0] === "w" ? 0 : 1, dist(stop, c.pos)]);
   const named = usable.filter((c) => c.sameName);
   if (named.length) return nearest(named, segment && spotPos ? spotPos : stop);
   return nearest(usable.filter((c) => !c.claimed && dist(stop, c.pos) <= settings.thresholds.platform_unclaimed_m), stop);
@@ -741,7 +741,7 @@ const OTHER_FEATURE = /^(?:crossing(?::.*)?|traffic_signals(?::.*)?|traffic_calm
 /** What says which stop it is: on a stop_position shared by two stops, it may be the other one's. */
 const STOP_IDENTITY = /^(?:gtfs:|(?:ref|local_ref|network|operator|route_ref)(?::|$))/;
 
-/** {tags, moved} of an object that is a stop_position: tags, only public_transport=stop_position, its vehicles and its name, as well as what describes something else on the node
+/** {tags, moved} of an object that is a stop_position: tags, only public_transport=stop_position, its vehicles, its name and its local_ref, as well as what describes something else on the node
  * (highway=traffic_signals, crossing...), and moved, the tags that belong on its platform. direction and alt_name are dropped, and highway=bus_stop or platform, which its platform has. */
 export function stopPositionOnly(old, name, vehicles = []) {
   const tags = { public_transport: "stop_position" }, moved = {};
@@ -749,7 +749,7 @@ export function stopPositionOnly(old, name, vehicles = []) {
     if (k === "public_transport" || k === "name" || k === "direction" || k === "alt_name") continue;
     if (k === "highway") {
       if (v !== "bus_stop" && v !== "platform") tags[k] = v;
-    } else if (VEHICLE_KEYS.has(k) || OTHER_FEATURE.test(k)) tags[k] = v;
+    } else if (VEHICLE_KEYS.has(k) || OTHER_FEATURE.test(k) || k === "local_ref") tags[k] = v; // local_ref: which bay, the way its platform is found
     else moved[k] = v;
   }
   for (const vehicle of vehicles) tags[vehicle] = "yes";

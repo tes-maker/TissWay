@@ -95,3 +95,35 @@ test("a stop_position is not created next to an existing one, even left to the s
   const obj = new Store({ a: { lat: 49, lon: 1, tags: {} }, s: { ...position(49.00006, 1) }, b: { lat: 49.001, lon: 1, tags: {} }, w: { tags: { highway: "residential" }, nodes: ["a", "s", "b"] } });
   assert.equal(locateStop(obj, ["w"], [49, 1.0002], { rivals: [[49.00006, 0.9998]] }).node, "s");
 });
+
+// --- local_ref, and an area drawn with a node of the same ref
+
+test("local_ref: the stop_position with the local_ref of the platform goes first, one with another local_ref is never its own", () => {
+  const osm = { n1: platform(49.17639, -0.3467, "14A", { local_ref: "A" }) };
+  const nodes = { near: { ...position(49.17639, -0.34668), tags: { ...position(0, 0).tags, local_ref: "B" } }, own: { ...position(49.17641, -0.34675), tags: { ...position(0, 0).tags, local_ref: "A" } } };
+  assert.equal(paired(BAYS.slice(0, 1), osm, nodes).paired.get("n1"), "own");
+  const { own, ...other } = nodes;
+  assert.ok(own);
+  assert.ok(!paired(BAYS.slice(0, 1), osm, other).paired.has("n1"));
+});
+
+test("a stop without a platform: its platform_code is its local_ref", () => {
+  const rows = [{ ...stop("X", 49, 1, "Gare"), platform_code: "2" }];
+  const tagged = (lat, ref) => ({ ...position(lat, 1), tags: { ...position(0, 0).tags, local_ref: ref } });
+  assert.equal(paired(rows, {}, { a: tagged(49.00001, "1"), b: tagged(49.00008, "2") }).paired.get("idX"), "b");
+});
+
+test("an area and a node with the same ref: one platform, the area first, nearest to the stop_position by either", () => {
+  const area = { version: "1", tags: { public_transport: "platform", name: "Gare Routière", ref: "14A" }, nodes: [], center: [49.1766, -0.3467] };
+  const pole = platform(49.17639, -0.34668, "14A");
+  const stops = paired(BAYS.slice(0, 1), { w1: area, n1: pole }, { s: position(49.17638, -0.34668) });
+  assert.equal(stops.platformByRef("id14A").id, "w1");
+  assert.equal(stops.platforms.get("id14A").find((c) => c.id === "w1").twin, "n1");
+  assert.equal(stops.paired.get("w1"), "s"); // 23 m from the area, 1 m from its node
+  assert.ok(!stops.paired.has("n1"));
+});
+
+test("an area with its node of the same ref goes before a platform carrying the stop_id alone", () => {
+  const at = (id, more) => ({ id, pos: [49, 1], holder: false, byRef: true, far: false, ...more });
+  assert.equal(choosePlatform([at("n1", { holder: true }), at("w2", { twin: "n3" })], [49, 1]).id, "w2");
+});
