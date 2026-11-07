@@ -89,8 +89,9 @@ class LineBuilder {
     const road = spot && ((p) => roadDistance(obj, ways, p, spot.wayIndex));
     const side = spot && ((p) => sideSegment(obj, ways, spot, p));
     const initial = stops.bays.has(stopId) ? stops.bayPlatform(stopId) : choosePlatform(stops.platforms.get(stopId) || [], latlon(s), { segment, spotPos: spot?.pos, road, side });
-    const [c, dataId] = stops.bays.has(stopId) ? [initial, stopId] : fixSide(stopId, initial, segment, stops, road, side);
-    if (dataId !== stopId) this.swapped.push(`${s.stop_name} (${stopId} -> ${dataId}${c ? "" : ", platform created"})`);
+    let [c, dataId] = stops.bays.has(stopId) ? [initial, stopId] : fixSide(stopId, initial, segment, stops, road, side);
+    if (!c) dataId = stopId; // a platform created takes the GTFS stop as it is: its position and its data, not those of the stop across the road
+    if (dataId !== stopId) this.swapped.push(`${s.stop_name} (${stopId} -> ${dataId})`);
     const d = stops.df.get(dataId);
     if (c && !c.holder && !c.byRef && !c.sameName) this.unsure.push(`${d.stop_name} (${dataId}): ${c.id}${c.name ? ` "${c.name}"` : ""}`);
     if (!c && !this.created.has(dataId)) {

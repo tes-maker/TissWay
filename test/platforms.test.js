@@ -202,11 +202,23 @@ test("both directions get their own stop_position on a two-way street", () => {
   approx(obj.get(b).lat, 49.00065);
 });
 
-test("stop across the road uses the opposite stop and its stop_position", () => {
+test("a stop across the road without an OSM platform: the platform created is the GTFS stop itself, at its position, with its data", () => {
   const obj = street();
   const [[rel], assignments] = build([variant("0", ["S", "B", "N"], "t1", ["wS", "wR", "wN"])], lineStops(), obj);
-  approx(obj.get(stopMembers(rel)[1]).lat, 49.0004);
-  assert.ok(assignments.has("A") && !assignments.has("B"));
+  approx(obj.get(stopMembers(rel)[1]).lat, 49.00065);
+  assert.ok(assignments.has("B") && !assignments.has("A"));
+  const platform = rel.members.filter(([, role]) => role === "platform")[1][0];
+  assert.deepEqual([obj.get(platform).lat, obj.get(platform).lon].map(Number), [49.00065, WEST]);
+});
+
+test("a stop_position whose platform is created keeps what it has more: the platform only takes the GTFS", () => {
+  const obj = new Store({ s: { lat: 49, lon: 1, tags: { public_transport: "stop_position", bus: "yes", shelter: "yes", ref: "X" } }, p: { lat: 49, lon: 1.0001, tags: {} } });
+  obj.set("n-500", { lat: 49, lon: 1.0001, tags: {} });
+  setStopPositionTags(obj, "s", "Gare", "bus", { platform: "n-500", exclusive: true });
+  assert.deepEqual(obj.get("s").tags, { public_transport: "stop_position", bus: "yes", name: "Gare", shelter: "yes", ref: "X" });
+  assert.deepEqual(obj.get("n-500").tags, {});
+  setStopPositionTags(obj, "s", "Gare", "bus", { platform: "p", exclusive: true });
+  assert.equal(obj.get("p").tags.shelter, "yes"); // an existing platform still takes it
 });
 
 // --- platforms
