@@ -76,7 +76,7 @@ export class Stops {
 const BAYS = 3; // more platforms with a ref under one name than the two sides of a road
 
 /** Set stops.bays and stops.paired. Each OSM platform takes a stop_position within stop_position_reuse_m, each of them for one platform only: first one with its local_ref, then the nearest, the closest
- * pairs first. One with another local_ref is never its own. An area and a node with the same ref are one platform: the area, nearest by either. A stop without a platform of its own counts at its GTFS
+ * pairs first. One with another local_ref is never its own. An area and a node with the same ref are one platform: the node, nearest by either. A stop without a platform of its own counts at its GTFS
  * position, its local_ref being its platform_code. A platform with the stop_id or the ref of a stop of which another platform was chosen is a duplicate, and does not count.
  * positions, osm: {key: object} of the stop_positions and of the OSM stops. */
 export function pairStopPositions(stops, positions, osm) {
@@ -88,11 +88,11 @@ export function pairStopPositions(stops, positions, osm) {
   }
   const chosen = new Set([...byRef.values()].filter(Boolean).map((c) => c.id));
   const holding = new Set([...stops.df.keys()].flatMap((id) => (stops.platforms.get(id) || []).filter((c) => c.holder || c.byRef).map((c) => c.id)));
-  const twins = twinsOf(osm), twinNodes = new Set(twins.values());
+  const areaOf = new Map([...twinsOf(osm)].map(([area, node]) => [node, area]));
   const localRef = (...keys) => keys.map((k) => osm[k]?.tags?.local_ref).find(Boolean) ?? null;
   const owners = [
-    ...osmPlatforms(osm).filter((p) => !twinNodes.has(p.id) && (chosen.has(p.id) || !holding.has(p.id)))
-      .map((p) => [p.id, [p.pos, ...(twins.has(p.id) ? [osmPosition(osm[twins.get(p.id)])] : [])], localRef(p.id, twins.get(p.id))]),
+    ...osmPlatforms(osm).filter((p) => !twinAreas(areaOf).has(p.id) && (chosen.has(p.id) || areaOf.has(p.id) || !holding.has(p.id)))
+      .map((p) => [p.id, [p.pos, ...(areaOf.has(p.id) ? [osmPosition(osm[areaOf.get(p.id)])] : [])], localRef(p.id, areaOf.get(p.id))]),
     ...[...stops.df].filter(([id]) => !(stops.platforms.get(id) || []).some((c) => c.holder || c.byRef || c.sameName)).map(([id, s]) => [id, [latlon(s)], s.platform_code || null]),
   ];
   const nodes = Object.entries(positions).filter(([, o]) => o.lat !== undefined && isStopPositionFor(o.tags)).map(([k, o]) => [k, latlon(o), o.tags.local_ref ?? null]);
@@ -149,6 +149,8 @@ function sameStopName(stopName, tags) {
   const keys = new Set(nameKeysOf(stopName ?? ""));
   return Object.entries(tags).some(([k, v]) => /^(?:name|official_name|gtfs:stop_name(?::.*)?)$/.test(k) && splitTag(v).some((name) => nameKeysOf(name).some((key) => keys.has(key))));
 }
+
+const twinAreas = (areaOf) => new Set(areaOf.values());
 
 /** area -> node of the same platform: an area (a way) and a node within platform_m with a ref in common. Each node goes with its nearest area. */
 export function twinsOf(osm) {
@@ -209,10 +211,10 @@ export function matchStops(stopRows, agencies, osm) {
     }
   }
 
-  const twins = twinsOf(osm);
+  const twins = twinsOf(osm), areaOf = new Map([...twins].map(([area, node]) => [node, area]));
   for (const [stopId, candidates] of platforms) {
     for (const c of candidates) {
-      c.twin = twins.get(c.id) ?? null; // an area with a node of the same ref: one platform drawn twice
+      c.twin = twins.get(c.id) ?? areaOf.get(c.id) ?? null; // an area and a node of the same ref: one platform drawn twice, the node being the one used
       c.claimed = [...(claims.get(c.id) ?? [])].some((id) => id !== stopId);
       c.shared = [...holders].some(([id, keys]) => id !== stopId && df.has(id) && keys.has(c.id)); // it holds the stop_id of another stop as well
     }

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import "./helpers.js";
 import * as naming from "../src/naming.js";
+import { cleanStopName, unaccent } from "../src/naming.js";
 import { configure, settings } from "../src/settings.js";
 
 for (const [town, name, label] of [
@@ -99,22 +100,40 @@ test("stopNames: capitals are taken out only when they name a place", async () =
 });
 
 test("stopNames in a commune nouvelle: its name first, the former commune stays in the name of the stop", async () => {
-  const delegated = async (place, commune) => ({ BROUAY: "Thue et Mue", "MEZIDON-CANON": "Mézidon Vallée d'Auge" })[place] === commune;
+  const OFFICIAL = { BROUAY: ["Brouay", "Thue et Mue"], "MEZIDON-CANON": ["Mézidon-Canon", "Mézidon Vallée d'Auge"] };
+  const delegated = async (place, commune) => { const [spelling, parent] = OFFICIAL[unaccent(place).toUpperCase()] ?? []; return parent === commune ? spelling : null; };
   const near = async (place) => ["CAEN", "BROUAY", "MEZIDON-CANON"].includes(place);
   const check = async (town, name, stop, official) => assert.deepEqual(await naming.stopNames(town, name, near, delegated), official ? { name: stop, official_name: official } : { name: stop });
   await check("Thue et Mue", "Brouay Mairie", "Brouay Mairie", "THUE ET MUE - Brouay Mairie");
   await check("Thue et Mue", "THUE ET MUE - Brouay Mairie", "Brouay Mairie", "THUE ET MUE - Brouay Mairie"); // run again
   await check("Thue et Mue", "Bretteville-l'Orgueilleuse Gare", "Bretteville-l'Orgueilleuse Gare", "THUE ET MUE - Bretteville-l'Orgueilleuse Gare");
   await check("Thue et Mue", "Mairie", "Mairie", "THUE ET MUE - Mairie");
-  await check("Thue et Mue", "BROUAY Mairie", "BROUAY Mairie", "THUE ET MUE - BROUAY Mairie");
-  await check("Thue et Mue", "BROUAY - Mairie", "BROUAY Mairie", "THUE ET MUE - BROUAY Mairie");
+  // "Ancienne Commune Arret", the commune in its official spelling, whatever the case and the separator
+  for (const given of ["BROUAY Mairie", "BROUAY - Mairie", "BROUAY -Mairie", "BROUAY: Mairie", "Brouay - Mairie", "BROUAY, Mairie", "Mairie - Brouay", "Mairie - BROUAY", "Mairie (Brouay)", "Mairie, Brouay",
+    "brouay - mairie", "THUE ET MUE - BROUAY Mairie", "Thue et Mue - Brouay - Mairie", "BROUAY Mairie (Thue et Mue)"]) {
+    await check("Thue et Mue", cleanStopName(given), "Brouay Mairie", "THUE ET MUE - Brouay Mairie");
+  }
+  await check("Thue et Mue", "Brouay - Rue de Caen", "Brouay Rue de Caen", "THUE ET MUE - Brouay Rue de Caen");
+  await check("Thue et Mue", "Gare - Rives de l'Orne", "Gare - Rives de l'Orne", "THUE ET MUE - Gare - Rives de l'Orne"); // no former commune in it: as it is
   await check("Thue et Mue", "Thue et Mue - Brouay Mairie", "Brouay Mairie", "THUE ET MUE - Brouay Mairie");
-  await check("Mézidon Vallée d'Auge", "MEZIDON-CANON - college", "MEZIDON-CANON college", "MEZIDON VALLEE D'AUGE - MEZIDON-CANON college");
+  await check("Mézidon Vallée d'Auge", "MEZIDON-CANON - college", "Mézidon-Canon College", "MEZIDON VALLEE D'AUGE - Mézidon-Canon College");
+  await check("Mézidon Vallée d'Auge", "MEZIDON-CANON: college", "Mézidon-Canon College", "MEZIDON VALLEE D'AUGE - Mézidon-Canon College");
   await check("Saint-Pierre-en-Auge", "Saint-Pierre-sur-Dives Mairie", "Saint-Pierre-sur-Dives Mairie", "SAINT-PIERRE-EN-AUGE - Saint-Pierre-sur-Dives Mairie");
   await check("Saint-Manvieu-Norrey", "Norrey Calvaire", "Norrey Calvaire", "SAINT-MANVIEU-NORREY - Norrey Calvaire");
   await check("Condé-en-Normandie", "Condé-sur-Noireau Hôpital", "Condé-sur-Noireau Hôpital", "CONDE-EN-NORMANDIE - Condé-sur-Noireau Hôpital");
   await check("Hérouville-Saint-Clair", "CAEN Chemin Vert", "Chemin Vert", "CAEN - Chemin Vert"); // another town, not a former commune of this one
   await check("Mondeville", "Hauts de Mondeville", "Hauts de Mondeville");
+});
+
+test("placeCase: a place in capitals, the French way, when its official spelling is not known", () => {
+  for (const [given, expected] of [["BROUAY", "Brouay"], ["THUE ET MUE", "Thue et Mue"], ["PONT-L'EVEQUE", "Pont-l'Eveque"], ["ST-MARTIN-DES-ENTREES", "Saint-Martin-des-Entrees"],
+    ["STE MERE EGLISE", "Sainte Mere Eglise"], ["LE MESNIL-SUR-BLANGY", "Le Mesnil-sur-Blangy"], ["BRETTEVILLE-L'ORGUEILLEUSE", "Bretteville-l'Orgueilleuse"], ["LA FERRIERE-AU-DOYEN", "La Ferriere-au-Doyen"]]) {
+    assert.equal(naming.placeCase(given), expected, given);
+  }
+});
+
+test("stopNames: a former commune confirmed without its spelling is written the French way", async () => {
+  assert.deepEqual(await naming.stopNames("Thue et Mue", "BROUAY - Mairie", async () => false, async (place) => place === "BROUAY"), { name: "Brouay Mairie", official_name: "THUE ET MUE - Brouay Mairie" });
 });
 
 test("routeLabel in a commune nouvelle: the titles follow", () => {

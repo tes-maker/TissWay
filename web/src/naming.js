@@ -187,17 +187,56 @@ export function stopKey(name) {
   return nameKey(m && name.slice(m[0].length) ? name.slice(m[0].length) : name);
 }
 
+const LOWER_WORDS = new Set(["sur", "sous", "en", "et", "le", "la", "les", "de", "du", "des", "aux", "au", "lès", "lez", "à"]);
+
+/** A place written in capitals, the French way: "THUE ET MUE" -> "Thue et Mue", "PONT-L'EVEQUE" -> "Pont-l'Eveque", "ST-MARTIN-DES-ENTREES" -> "Saint-Martin-des-Entrees". Its accents
+ * are not known here: the official spelling, when there is one, is better. */
+export function placeCase(place) {
+  let first = true;
+  const word = (w) => {
+    if (!w) return w;
+    const lower = w.toLowerCase(), elided = /^([dl])['’](.+)$/.exec(lower);
+    const out = { st: "Saint", ste: "Sainte" }[lower] ?? (elided ? `${elided[1]}'${capitalized(elided[2])}` : !first && LOWER_WORDS.has(lower) ? lower : capitalized(lower));
+    first = false;
+    return out;
+  };
+  return place.trim().split(/(\s+|-)/).map((part) => (/^(?:\s+|-)$/.test(part) ? (part === "-" ? "-" : " ") : word(part))).join("");
+}
+
+const upperFirst = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const BEFORE = /^(.+?)\s*(?:\s-\s|:|,)\s*(.+)$/u; // "BROUAY - Mairie", "Brouay: Mairie", "Brouay, Mairie"
+const AFTER = /^(.+?)(?:\s+-\s+|,\s*|\s*\()(.+?)\)?$/u; // "Mairie - Brouay", "Mairie, Brouay", "Mairie (Brouay)"
+
+/** The stop "Ancienne Commune Arret" when the name says a former commune of commune, before the stop or after it, whatever the case and the separator: "BROUAY Mairie",
+ * "BROUAY - Mairie", "Mairie (Brouay)" -> "Brouay Mairie". The commune takes its official spelling (isDelegated), the stop a capital. Otherwise the name, unchanged. */
+async function withFormerCommune(name, commune, isDelegated) {
+  if (!commune) return name;
+  const spelling = async (place) => {
+    const found = await isDelegated(place.trim(), commune);
+    return found ? (typeof found === "string" ? found : placeCase(place)) : null;
+  };
+  const caps = capitalsFirst(name), before = BEFORE.exec(name), after = AFTER.exec(name);
+  for (const [place, rest] of [caps && [caps.place, caps.rest], before && [before[1], before[2]], after && [after[2], after[1]]].filter(Boolean)) {
+    if (!place.trim() || !rest.trim()) continue;
+    const official = await spelling(place);
+    if (official) return `${official} ${upperFirst(rest.trim())}`;
+  }
+  return name;
+}
+
 /** {name, official_name} of a stop: {name: "Charlotte Corday", official_name: "MONDEVILLE - Charlotte Corday"}, whether the town is in the name
  * given or not. A town that cannot be taken out ("Hauts de Mondeville"), a name that is only the town, or no known town: no official_name, it
  * would say nothing more. Capitals at the start that are not the town of the position are taken out when isPlace(capitals) confirms a place:
  * a former commune, or just over the boundary; "CHU Côte de Nacre" stays whole. The prefix of a commune nouvelle is the commune nouvelle: the commune déléguée a name says is part of
- * the name of the stop ("Brouay Mairie" in Thue et Mue: official_name "THUE ET MUE - Brouay Mairie"), also in capitals when isDelegated(capitals, commune) confirms it. */
-export async function stopNames(places, name, isPlace = async () => false, isDelegated = async () => false) {
-  const named = (town, rest) => {
-    const stop = cleanStopName(rest.replace(/^\(([^()]*)\)$/, "$1")); // "CAEN (Gare)"
+ * the name of the stop, as "Ancienne Commune Arret" in its official spelling, whatever its case and where the name has it ("BROUAY Mairie", "BROUAY - Mairie", "Mairie (Brouay)" in Thue et Mue:
+ * name "Brouay Mairie", official_name "THUE ET MUE - Brouay Mairie"), when isDelegated(place, commune) confirms it. */
+export async function stopNames(places, name, isPlace = async () => false, isDelegated = async () => null) {
+  const towns = toList(places);
+  const named = async (town, rest) => {
+    let stop = cleanStopName(rest.replace(/^\(([^()]*)\)$/, "$1")); // "CAEN (Gare)"
+    if (town === towns[0]) stop = cleanStopName(await withFormerCommune(stop, town, isDelegated));
     return { name: stop, official_name: `${upperTown(town)} - ${stop}` };
   };
-  const towns = toList(places);
   for (const town of towns) {
     const rest = withoutTown(town, name);
     if (rest !== null) return rest ? named(town, rest) : { name };
@@ -205,7 +244,7 @@ export async function stopNames(places, name, isPlace = async () => false, isDel
   if (CAPITALS_FIRST.test(name)) {
     const other = capitalsFirst(name);
     if (!other) return { name };
-    if (towns.length && (await isDelegated(other.place, towns[0]))) return named(towns[0], `${other.place} ${other.rest}`);
+    if (towns.length && (await isDelegated(other.place, towns[0]))) return named(towns[0], name);
     return (await isPlace(other.place)) ? named(other.place, other.rest) : { name };
   }
   if (!towns.length || towns.some((t) => saysTown(t, name))) return { name };

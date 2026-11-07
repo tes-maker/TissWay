@@ -215,8 +215,12 @@ export function throughNode(obj, ways, node, i, n, roads, limit) {
 
 const SERVICE = new Set(["service", "busway", "bus_guideway"]);
 
+/** Does the trace pass a stop_position within stop_position_reuse_m of pos? */
+const passesStopPosition = (obj, ways, pos) => ways.some((w) => obj.get(w).nodes.some((n) => isStopPositionFor(obj.get(n)?.tags ?? {}) && dist(latlon(obj.get(n)), pos) <= settings.thresholds.stop_position_reuse_m));
+
 /** Bring the traces to the stop_position of the platform with the ref of their stops, when the GTFS shape stops before it, by the roads a bus may take: for a first or last stop, within terminus_m, or
- * bay_road_m for a bay; in between, only by a stop_position on a road of service, as a bay: a line does not leave its road for a stop_position on a street alongside. Returns the ways and nodes read. */
+ * bay_road_m for a bay; in between, only by a stop_position on a road of service, as a bay: a line does not leave its road for a stop_position on a street alongside. Out of a bay, a trace passing
+ * a stop_position near the platform already is left as it is. Returns the ways and nodes read. */
 export async function reachStopPositions(variants, stops, roads) {
   const pending = variants.filter((v) => !v.complete && v.ways.length).flatMap((v) => v.seq.map((id, i) => [v, id, i])).filter(([v, id]) => {
     const node = stops.stopPositionOf(id);
@@ -239,6 +243,7 @@ export async function reachStopPositions(variants, stops, roads) {
     const node = stops.stopPositionOf(id), name = stops.df.get(id).stop_name, end = i === 0 || i === v.seq.length - 1;
     if (!obj.has(node) || v.ways.some((w) => obj.get(w).nodes.includes(node))) continue;
     if (!end && !keys.some((w) => SERVICE.has(obj.get(w).tags.highway) && obj.get(w).nodes.includes(node))) continue;
+    if (!stops.bays.has(id) && passesStopPosition(obj, v.ways, stops.platformByRef(id)?.pos ?? latlon(stops.df.get(id)))) continue; // it already has one: the trace is not changed for a nearer one
     const limit = stops.bays.has(id) ? bay_road_m : terminus_m;
     const ways = throughNode(obj, v.ways, node, i, v.seq.length, keys, limit);
     if (ways) {
