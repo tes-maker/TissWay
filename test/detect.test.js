@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import "./helpers.js";
-import { detectFeed, detectRefFromStopId, detectStopRefTags, feedCodeOf, networkFromOsm } from "../src/detect.js";
+import { detectFeed, detectStopRefTags, feedCodeOf, networkFromOsm } from "../src/detect.js";
 import { lookup, siteOf } from "../src/lookup.js";
 import { clearCaches, services } from "../src/net.js";
 import { settings } from "../src/settings.js";
@@ -30,16 +30,6 @@ test("detectStopRefTags needs several platforms and at least half of the values"
   ["S1", "S2", "S3"].forEach((v, i) => { osm[`e${i}`] = o({ "ref:FR:Atoumod:2": v }); }); // numbered: second value of the same tag
   ["S1", "S2", "S3"].forEach((v, i) => { osm[`f${i}`] = o({ "ref:FR:Atoumod:Nomad": v }); }); // same tag, for another network
   assert.deepEqual(detectStopRefTags(osm, ids), ["ref:FR:Atoumod"]);
-});
-
-test("detectRefFromStopId", () => {
-  const make = (refs) => {
-    const ids = refs.map((_, i) => `FR:1:ZE:CODE${i}:X`);
-    return [new Stops(new Map(ids.map((id) => [id, { stop_code: "" }])), new Map(ids.map((id, i) => [id, [{ id: `n${i}` }]])), new Map(), new Map()),
-      Object.fromEntries(refs.map((r, i) => [`n${i}`, o(r ? { ref: r } : {})]))];
-  };
-  assert.ok(detectRefFromStopId(...make(["CODE0", "CODE1", "CODE2"])));
-  assert.ok(!detectRefFromStopId(...make(["CODE0", "CODE1", null])));
 });
 
 test("networkFromOsm: route_id first, then a name beginning the agency's, on a line of the agency", () => {

@@ -44,14 +44,22 @@ function makeStops(rows, { neighbours, platforms, holders, rivals } = {}) {
 const gtfsStop = (stop_id, stop_code, lat, lon, stop_name = "Hopital") => ({ stop_id, stop_code, stop_name, wheelchair_boarding: "", platform_code: "", lat, lon });
 
 const atoumodId = "FR:76216:ZE:TCARxCAILL3:ATOUMOD001";
-test("stopRef", () => {
-  settings.ref_from_stop_id = true;
-  assert.equal(stopRef(gtfsStop(atoumodId, "", 49, 1), atoumodId), "TCARxCAILL3");
+test("stopRef: the stop_code, else the code of a NeTEx stop_id, else the whole stop_id", () => {
   assert.equal(stopRef(gtfsStop(atoumodId, "2705028A", 49, 1), atoumodId), "2705028A");
-  assert.equal(stopRef(gtfsStop("1234", "", 49, 1), "1234"), null);
+  assert.equal(stopRef(gtfsStop(atoumodId, "", 49, 1), atoumodId), "TCARxCAILL3");
+  assert.equal(stopRef(gtfsStop("FR:0:ZE:ESxBIO:ATOUMOD080", "", 49, 1), "FR:0:ZE:ESxBIO:ATOUMOD080"), "ESxBIO");
+  assert.equal(stopRef(gtfsStop("1234", "", 49, 1), "1234"), "1234");
+  assert.equal(stopRef(gtfsStop("NOMAD:A12", "", 49, 1), "NOMAD:A12"), "NOMAD:A12");
 });
 
-test("no ref from stop_id by default", () => assert.equal(stopRef(gtfsStop(atoumodId, "", 49, 1), atoumodId), null));
+test("stopRef: none from the stop_id with the setting on no, none at all with the GTFS refs not trusted", () => {
+  settings.ref_from_stop_id = "no";
+  assert.equal(stopRef(gtfsStop(atoumodId, "", 49, 1), atoumodId), null);
+  assert.equal(stopRef(gtfsStop(atoumodId, "2705028A", 49, 1), atoumodId), "2705028A");
+  settings.ref_from_stop_id = "yes";
+  settings.stop_refs_from_gtfs = false;
+  assert.equal(stopRef(gtfsStop(atoumodId, "2705028A", 49, 1), atoumodId), null);
+});
 
 // --- direction of travel
 

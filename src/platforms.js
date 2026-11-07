@@ -375,12 +375,13 @@ export function fixSide(stopId, platform, segment, stops, road = null, side = nu
 
 export const CODE_IN_ID = /(?:^|:)[A-Z]{2}:[^:]*:ZE:([^:]+)/; // NeTEx-style ids: "FR:<INSEE>:ZE:<code>:..."
 
-/** ref of a platform: the stop_code, else (settings.ref_from_stop_id) the code of a NeTEx-style stop_id, else null. Always null with settings.stop_refs_from_gtfs off. */
+/** ref of a platform: the stop_code, else, unless settings.ref_from_stop_id is "no", the code of a NeTEx-style stop_id ("FR:0:ZE:ESxBIO:ATOUMOD080" -> "ESxBIO"), else the whole stop_id.
+ * Always null with settings.stop_refs_from_gtfs off. */
 export function stopRef(stop, stopId) {
   if (!settings.stop_refs_from_gtfs) return null;
   if (stop.stop_code) return stop.stop_code;
-  const m = settings.ref_from_stop_id === true || settings.ref_from_stop_id === "yes" ? CODE_IN_ID.exec(stopId) : null;
-  return m ? m[1] : null;
+  if (settings.ref_from_stop_id === "no" || settings.ref_from_stop_id === false || !stopId) return null;
+  return CODE_IN_ID.exec(stopId)?.[1] ?? stopId;
 }
 
 const PHYSICAL_TAGS = new Set(["public_transport", "highway", "bus", "trolleybus", "wheelchair"]); // survey data wins
