@@ -113,17 +113,32 @@ test("a stop without a platform: its platform_code is its local_ref", () => {
   assert.equal(paired(rows, {}, { a: tagged(49.00001, "1"), b: tagged(49.00008, "2") }).paired.get("idX"), "b");
 });
 
-test("an area and a node with the same ref: one platform, the area first, nearest to the stop_position by either", () => {
+test("an area and a node with the same ref: one platform, the node used, nearest to the stop_position by either", () => {
   const area = { version: "1", tags: { public_transport: "platform", name: "Gare Routière", ref: "14A" }, nodes: [], center: [49.1766, -0.3467] };
-  const pole = platform(49.17639, -0.34668, "14A");
+  const pole = platform(49.1766, -0.34672, "14A");
   const stops = paired(BAYS.slice(0, 1), { w1: area, n1: pole }, { s: position(49.17638, -0.34668) });
-  assert.equal(stops.platformByRef("id14A").id, "w1");
+  assert.equal(stops.platformByRef("id14A").id, "n1");
   assert.equal(stops.platforms.get("id14A").find((c) => c.id === "w1").twin, "n1");
-  assert.equal(stops.paired.get("w1"), "s"); // 23 m from the area, 1 m from its node
-  assert.ok(!stops.paired.has("n1"));
+  assert.equal(stops.platforms.get("id14A").find((c) => c.id === "n1").twin, "w1");
+  const area2 = { ...area, center: [49.17639, -0.3467] };
+  const near = paired(BAYS.slice(0, 1), { w1: area2, n1: pole }, { s: position(49.17638, -0.34668) });
+  assert.equal(near.paired.get("n1"), "s"); // 24 m from the node, 2 m from its area
+  assert.ok(!near.paired.has("w1"));
 });
 
-test("an area with its node of the same ref goes before a platform carrying the stop_id alone", () => {
+test("the node drawn with an area of the same ref goes first, then that area, then a platform carrying the stop_id alone", () => {
   const at = (id, more) => ({ id, pos: [49, 1], holder: false, byRef: true, far: false, ...more });
+  assert.equal(choosePlatform([at("n1", { holder: true }), at("w2", { twin: "n3" }), at("n3", { twin: "w2" })], [49, 1]).id, "n3");
   assert.equal(choosePlatform([at("n1", { holder: true }), at("w2", { twin: "n3" })], [49, 1]).id, "w2");
+});
+
+test("tagPlatforms: the area drawn with the node of the same ref holds the stop_id too, and is not a duplicate elsewhere", async () => {
+  const { tagPlatforms } = await import("../src/platforms.js");
+  const area = { version: "1", tags: { public_transport: "platform", name: "Gare Routière", ref: "14A", "gtfs:stop_id": "id14A" }, nodes: [], center: [49.17639, -0.3467] };
+  const pole = { ...platform(49.17639, -0.34668, "14A"), version: "1" };
+  pole.tags["gtfs:stop_id"] = "id14A";
+  const stops = paired(BAYS.slice(0, 1), { w1: area, n1: pole }, {});
+  const obj = new Store({ w1: area, n1: pole });
+  const elsewhere = tagPlatforms(obj, stops, new Map([["id14A", new Map([["n1", [{ network: "Nomad" }, [49.17639, -0.34668], "bus", true]]])]]));
+  assert.deepEqual(elsewhere, []);
 });

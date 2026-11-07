@@ -320,3 +320,22 @@ test("the prefix of a relation: the setting when changed, else its own name", ()
   settings.prefixes.bus = "Bus Twisto";
   assert.equal(prefixOf({ ref: "224", name: "Car Nomad 224: A → B" }, "bus"), "Bus Twisto");
 });
+
+test("an area next to the node of the same platform leaves the relation, the node stays", async () => {
+  line();
+  const area = { type: "way", id: 8, version: 3, nodes: [], center: { lat: 49.00005, lon: 1 }, tags: { public_transport: "platform", name: "MONDEVILLE - Charlotte Corday", ref: "CC1" } };
+  answer.objects[0].tags.ref = "CC1";
+  answer.objects.push(area);
+  answer.relations[0].members.splice(2, 0, member("way", 8, "platform"));
+  const out = read((await run()).xml);
+  assert.deepEqual(out.get("r30").members, ["2", "1", "4", "3", "7"]);
+});
+
+test("an area alone, or of another stop, stays", async () => {
+  line();
+  const area = { type: "way", id: 8, version: 3, nodes: [], center: { lat: 49.00005, lon: 1 }, tags: { public_transport: "platform", name: "Poste" } };
+  answer.objects.push(area);
+  answer.relations[0].members.splice(2, 0, member("way", 8, "platform"));
+  const out = read((await run()).xml);
+  assert.ok(out.get("r30").members.includes("8"));
+});

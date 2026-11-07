@@ -2,7 +2,8 @@
 // relations are put in the form of this site. Only OSM is corrected, from OSM: the GTFS gives the networks and the area. Nothing is sent: the file is reviewed in JOSM.
 //
 // Stops: name and official_name (naming.stopNames), no alt_name, no bus=yes on platforms, GTFS ids and network tags tidied, a stop_position with only its vehicle and name, what it has more
-// going to its platform; an object tagged as the other kind, or in the other role, put right (stopKind). Relations: name, from, to, via, these roles. No member moves.
+// going to its platform; an object tagged as the other kind, or in the other role, put right (stopKind). Relations: name, from, to, via, these roles. No member moves; one platform per stop: an area
+// next to the node of the same platform (same ref, or same name within platform_m) leaves the relation, the node stays.
 
 import { networkFromOsm } from "./detect.js";
 import { bbox, dist, latlon, osmPosition } from "./geo.js";
@@ -11,6 +12,7 @@ import { ARROWS, agencyNetworks, cleanStopName, masterLabel, nameKey, routeTitle
 import { Store, changesOsm, completeWayNodes, differsFromOsm, onRoad, readObjects, routesIn, writeOsm } from "./osm.js";
 import { selectRoutes } from "./pipeline.js";
 import { networkStops } from "./platform_tags.js";
+import { twinsOf } from "./stops.js";
 import { chooseVias } from "./via.js";
 import { VEHICLE, nameNumberedNetworkTags, nameNumberedRefs, stopPositionOnly, takeFromStopPosition } from "./platforms.js";
 import { settings } from "./settings.js";
@@ -197,6 +199,24 @@ export async function runNetworkFix(feed, { network, onProgress = () => {} }) {
   });
   for (const route of routes) route[1] = { ...route[1], members: withRoles(route[1].members) };
 
+  // one platform per stop: an area next to the node of the same platform leaves the relation, the node stays
+  const drawnTwice = twinsOf(Object.fromEntries(objects));
+  const samePlatform = (area, node) => {
+    if (drawnTwice.get(area) === node) return true;
+    const [a, n] = [objects.get(area), objects.get(node)];
+    return Boolean(a && n && a.tags.name && stopKey(a.tags.name) === stopKey(n.tags.name ?? "") && osmPosition(a) && dist(osmPosition(a), latlon(n)) <= settings.thresholds.platform_m);
+  };
+  let nAreas = 0;
+  const withoutAreas = (key, members) => members.filter(([ref, role], i) => {
+    if (ref[0] !== "w" || kinds.get(ref) !== "platform" || !role.startsWith("platform")) return true;
+    const node = [members[i - 1], members[i + 1]].find((m) => m && m[0][0] === "n" && m[1].startsWith("platform") && kinds.get(m[0]) === "platform" && samePlatform(ref, m[0]));
+    if (!node) return true;
+    nAreas++;
+    log.info(`${key}: area ${ref} removed, the node ${node[0]} of the same platform stays`);
+    return false;
+  });
+  for (const route of routes) route[1] = { ...route[1], members: withoutAreas(route[0], route[1].members) };
+
   const set = (key, o, tags) => {
     if (!differsFromOsm({ ...o, tags }, relations[key])) return false;
     if (tags.name !== o.tags.name) log.info(`${key}: ${o.tags.name ?? "(no name)"} -> ${tags.name}`);
@@ -254,7 +274,7 @@ export async function runNetworkFix(feed, { network, onProgress = () => {} }) {
 
   if (!changesOsm(obj)) throw new Error(`Nothing to correct: the ${roles.size} stops and ${routes.length} route relations of "${network}" are already in this form.`);
   await completeWayNodes(obj);
-  log.info(`Network ${network}: ${nStops} of ${roles.size} stops corrected, ${nKinds} of them platform <-> stop_position, ${nRoles} role(s) put right, ${nRoutes} of ${routes.length} route relations and ${nMasters} route_masters corrected`);
+  log.info(`Network ${network}: ${nStops} of ${roles.size} stops corrected, ${nKinds} of them platform <-> stop_position, ${nRoles} role(s) put right, ${nAreas} area(s) beside the node of their platform removed, ${nRoutes} of ${routes.length} route relations and ${nMasters} route_masters corrected`);
   return { xml: writeOsm(obj), filename: `${slug(network)}_correction.osm`, summary: { "corrected stops": nStops, "corrected roles": nRoles, "corrected routes": nRoutes, "corrected route_masters": nMasters },
     detected: osmName && nameKey(osmName) !== nameKey(network) ? [["Network in OSM", osmName]] : [] };
 }

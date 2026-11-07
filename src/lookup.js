@@ -54,16 +54,16 @@ export const lookup = {
     return [a.city ?? a.town ?? a.village ?? a.municipality].filter(Boolean);
   },
 
-  /** Is this name officially a commune déléguée or associée of this commune (Découpage administratif API)? Unknown counts as no. */
+  /** The official spelling of this name when it is a commune déléguée or associée of this commune (Découpage administratif API): "BROUAY" -> "Brouay". null if not; unknown counts as no. */
   isDelegated(name, commune) {
     const params = new URLSearchParams({ nom: name, fields: "nom,type,chefLieu", limit: 5 });
-    return soft("Découpage administratif", false, async () => {
+    return soft("Découpage administratif", null, async () => {
       for (const part of await cachedJson(`${GEO_API}/communes_associees_deleguees?${params}`)) {
         if (nameKey(part.nom) !== nameKey(name) || !part.chefLieu) continue;
         const parent = await cachedJson(`${GEO_API}/communes/${part.chefLieu}?fields=nom`);
-        if (nameKey(parent.nom) === nameKey(commune)) return true;
+        if (nameKey(parent.nom) === nameKey(commune)) return part.nom;
       }
-      return false;
+      return null;
     });
   },
 

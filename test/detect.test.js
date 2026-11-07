@@ -192,12 +192,12 @@ test("placesAt elsewhere: every name, municipality kept", async () => {
 
 test("isDelegated: an exact name, of this commune; the API failing counts as no", async () => {
   france();
-  assert.equal(await lookup.isDelegated("MEZIDON-CANON", "Mézidon Vallée d'Auge"), true);
-  assert.equal(await lookup.isDelegated("Vire", "Caen"), false);
-  assert.equal(await lookup.isDelegated("Paris 13e Arrondissement", "Paris"), false);
+  assert.equal(await lookup.isDelegated("MEZIDON-CANON", "Mézidon Vallée d'Auge"), "Mézidon-Canon"); // its official spelling
+  assert.equal(await lookup.isDelegated("Vire", "Caen"), null);
+  assert.equal(await lookup.isDelegated("Paris 13e Arrondissement", "Paris"), null);
   clearCaches();
   answers = () => new Response("{}", { status: 400 });
-  assert.equal(await lookup.isDelegated("Tourlaville", "Cherbourg-en-Cotentin"), false);
+  assert.equal(await lookup.isDelegated("Tourlaville", "Cherbourg-en-Cotentin"), null);
 });
 
 for (const [name, found, yes] of [

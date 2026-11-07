@@ -314,14 +314,14 @@ const nearest = (candidates, ref) => minBy(candidates, (c) => dist(ref, c.pos)) 
 const hasItsRef = (c) => c.holder || c.byRef;
 
 /** The OSM platform of a stop, on the kerb side of the road, or null to create one:
- * 1. the one with its ref: an area with a node of the same ref (one platform drawn twice, see stops.twinsOf), then carrying its stop_id, then with its code as a ref, then holding no other stop, then drawn as a way (a stray node comes after the platform drawn), then the nearest;
+ * 1. the one with its ref: the node drawn with an area of the same ref (one platform drawn twice, see stops.twinsOf), then that area, then carrying its stop_id, then with its code as a ref, then holding no other stop, then drawn as a way (a stray node comes after the platform drawn), then the nearest;
  * 2. else the one with its name, the nearest to the GTFS stop, or to the stop_position (spotPos), more accurate;
  * 3. else one very close (thresholds.platform_unclaimed_m), whatever its name, that no other stop has the ref or the name of: a second platform would duplicate it. The caller reports it.
  * Unverified far candidates are left out. Without a segment, the side is not judged. */
 export function choosePlatform(candidates, stop, { segment = null, spotPos = null, road = null, side = null } = {}) {
   const usable = candidates.filter((c) => verified(c, segment, road, side) && (!segment || onKerb(c.pos, segment, side)));
   const ofRef = usable.filter(hasItsRef);
-  if (ofRef.length) return minBy(ofRef, (c) => [c.twin && c.byRef ? 0 : 1, c.holder ? 0 : 1, c.byRef ? 0 : 1, c.shared ? 1 : 0, c.id[0] === "w" ? 0 : 1, dist(stop, c.pos)]);
+  if (ofRef.length) return minBy(ofRef, (c) => [c.twin && c.byRef ? (c.id[0] === "n" ? 0 : 1) : 2, c.holder ? 0 : 1, c.byRef ? 0 : 1, c.shared ? 1 : 0, c.id[0] === "w" ? 0 : 1, dist(stop, c.pos)]);
   const named = usable.filter((c) => c.sameName);
   if (named.length) return nearest(named, segment && spotPos ? spotPos : stop);
   return nearest(usable.filter((c) => !c.claimed && dist(stop, c.pos) <= settings.thresholds.platform_unclaimed_m), stop);
@@ -419,7 +419,8 @@ export function tagPlatforms(obj, stops, assignments, { sizes = null, ofStop = n
   for (const [dataId, plats] of assignments) {
     const d = stops.df.get(dataId);
     const holders = stops.holders.get(dataId) ?? new Set();
-    const outside = [...holders].filter((h) => !plats.has(h)).sort();
+    const twins = new Set((stops.platforms.get(dataId) || []).filter((c) => plats.has(c.id) && c.twin).map((c) => c.twin)); // the area of the node used, or the reverse: the same platform
+    const outside = [...holders].filter((h) => !plats.has(h) && !twins.has(h)).sort();
     if (outside.length) elsewhere.push(`${d.stop_name} (${dataId}: ${outside.join(", ")})`);
     owners.set(dataId, outside.length ? null : minBy([...plats.keys()], (p) => [holders.has(p) ? 0 : 1, dist(latlon(d), plats.get(p)[1])]));
   }
