@@ -6,7 +6,7 @@
 // next to the node of the same platform (same ref, or same name within platform_m) leaves the relation, the node stays.
 
 import { networkFromOsm } from "./detect.js";
-import { bbox, dist, latlon, osmPosition } from "./geo.js";
+import { dist, latlon, osmPosition, zonesAround } from "./geo.js";
 import { lookup } from "./lookup.js";
 import { ARROWS, agencyNetworks, cleanStopName, masterLabel, nameKey, routeTitle, slug, stopKey, stopLabel, stopNames, tripTitle } from "./naming.js";
 import { Store, changesOsm, completeWayNodes, differsFromOsm, onRoad, readObjects, routesIn, writeOsm } from "./osm.js";
@@ -112,7 +112,7 @@ export async function runNetworkFix(feed, { network, onProgress = () => {} }) {
   const lines = selectRoutes(await feed.routes(), networks, network);
 
   onProgress("Relations of the network (Overpass)…");
-  const relations = await routesIn(bbox(stops.map(latlon), PAD_M), settings.modes);
+  const relations = await routesIn(zonesAround(stops.map(latlon), PAD_M), settings.modes);
   const osmName = networkFromOsm(network, lines, relations);
   const wanted = new Set([nameKey(network), ...(osmName ? [nameKey(osmName)] : [])]);
   const ofNetwork = (tags) => networksOf(tags).some((n) => wanted.has(n));

@@ -14,7 +14,7 @@
 import { buildLine } from "./build.js";
 import { detectStopRefTags, feedCodeOf, networkFromOsm } from "./detect.js";
 import { ExistingRoutes, WIKI_KEYS } from "./existing.js";
-import { bbox, inBbox, latlon } from "./geo.js";
+import { inZones, latlon, zonesAround } from "./geo.js";
 import { lineVariants, refSortKey, stopSequences } from "./gtfs.js";
 import { matchVariant } from "./matching.js";
 import { keepTraces, reachStopPositions, terminusRoads } from "./reuse.js";
@@ -246,7 +246,7 @@ async function prepareStops(feed, { allStops }, box, osmStops, detected) {
     settings.stop_ref_tags = [...settings.stop_ref_tags, ...refTags];
     detected.push(["Tags holding the stop_id", refTags.join(", ")]);
   }
-  const area = allStops.filter((s) => inBbox(latlon(s), box)).map((s) => ({ ...s, stop_name: cleanStopName(s.stop_name) }));
+  const area = allStops.filter((s) => inZones(latlon(s), box)).map((s) => ({ ...s, stop_name: cleanStopName(s.stop_name) }));
   const stops = matchStops(area, await feed.stopAgencies(), osmStops);
   await pairStops(stops, box, osmStops);
   return stops;
@@ -333,7 +333,7 @@ export async function runRoutes(feed, { network = null, ref = null, onProgress =
   await detectDrivingSide(country, detected);
 
   onProgress("OSM platforms (Overpass)…");
-  const box = bbox(used.map((id) => latlon(known.get(id))), PAD_M);
+  const box = zonesAround(used.map((id) => latlon(known.get(id))), PAD_M);
   const osmStops = await platformsIn(box);
   const stops = await prepareStops(feed, selection, box, osmStops, detected);
   await nameStops(stops, used, lang, onProgress);

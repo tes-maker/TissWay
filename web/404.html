@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TissWay</title>
+  <script>
+    // GitHub Pages serves this page for an address it has no file for. The addresses of the tabs (…/gtfs, …/gpx, …/settings) go to the
+    // site, which puts the address back (app.js, "address").
+    const tab = /^(.*?\/)(gtfs|gpx|settings)\/?$/.exec(location.pathname);
+    if (tab) location.replace(`${tab[1]}?view=${tab[2]}${location.hash}`);
+  </script>
+</head>
+<body style="font-family: system-ui, sans-serif; text-align: center; padding: 48px 16px">
+  <h1>Page not found</h1>
+  <p><a id="home" href="./">Go to tissway</a></p>
+  <script>document.getElementById("home").href = location.pathname.replace(/[^/]*\/?$/, "");</script>
+</body>
+</html>

@@ -10,7 +10,7 @@
 
 import { networkFromOsm } from "./detect.js";
 import { ExistingRoutes } from "./existing.js";
-import { bbox, latlon } from "./geo.js";
+import { latlon, zonesAround } from "./geo.js";
 import { nameKey, slug } from "./naming.js";
 import { Store, completeWayNodes, readObjects, relationsOfStops, routesIn, writeOsm } from "./osm.js";
 import { settings } from "./settings.js";
@@ -92,7 +92,7 @@ export async function runOperatorEdit(feed, { network, routeId, operator, newOpe
   if (!stops.length) throw new Error(`No stop for line ${label}.`);
 
   onProgress("Relations of the line (Overpass)…");
-  const relations = await routesIn(bbox(stops.map(latlon), PAD_M), settings.modes);
+  const relations = await routesIn(zonesAround(stops.map(latlon), PAD_M), settings.modes);
   const osmName = networkFromOsm(network, [line], relations);
   const names = [network, ...(osmName ? [osmName] : [])];
   const { routes, masters } = relationsOfLine(relations, line, names);

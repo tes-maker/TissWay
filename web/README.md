@@ -4,7 +4,9 @@ Turns a GTFS feed into OpenStreetMap public transport relations (PTv2), in the b
 lines, download a `.osm` file, review it in JOSM, upload it.
 
 **No server, no dependency, no build step.** The JavaScript you read here is exactly what runs in the browser, so the
-browser's debugger works directly on it. Host this folder anywhere static (GitHub Pages, Netlify, an S3 bucket…).
+browser's debugger works directly on it. Host this folder anywhere static (GitHub Pages, Netlify, an S3 bucket…). Each tab has
+its address (`/gtfs`, `/gpx`, `/settings`): the host must serve `404.html` for a missing page, as GitHub Pages and `npm start` do,
+and it sends them to the site.
 
 ```bash
 npm start     # http://localhost:8000 (modules cannot load from file://; any static server works)
@@ -20,6 +22,7 @@ npm test      # node --test, no install needed. Node >= 20.
 | PTNA list | The PTNA wiki page of a network, generated or updated from the current page. |
 | (drop an `.osm` file instead of a feed) | Adds "via …" to relations sharing a name in that file. |
 | Operator | `.osm` adding, removing or changing one operator on a line already in OSM: its route and route_master relations, its platforms, its stop_positions, as chosen. Only the `operator` tag changes. |
+| (GPX tab) Walking and cycling routes | `.osm` of a `route=hiking`, `foot`, `bicycle` or `mtb` relation following a GPX track on the ways suited to the type of route chosen, and that path as a `.gpx`. Also: any OSM route relation (or route_master) as a `.gpx`, with its stops as waypoints. |
 | (bottom of Settings) Correct a whole network | `.osm` putting the stops and relation names already mapped for a network in the form of this site, without changing a trace. |
 
 Nothing is ever uploaded to OSM: the file goes through a human, in JOSM.
@@ -105,7 +108,7 @@ Everything is called from the browser, so these must allow cross-origin requests
 | Service | Used for | Key |
 |---|---|---|
 | [Mobility Database](https://mobilitydatabase.org) | The GTFS archive. `files.mobilitydatabase.org/<id>/latest.zip` is public; with a token, the API also gives the feed's name and its producer URL as a fallback. | Optional |
-| [Valhalla](https://github.com/valhalla/valhalla), `valhalla1.openstreetmap.de` by default | Map-matching, one request per second at most. | Optional (`?api_key=`) |
+| [Valhalla](https://github.com/valhalla/valhalla), `valhalla1.openstreetmap.de` by default | Map-matching, and routing for the GPX tab, one request per second at most. | Optional (`?api_key=`) |
 | [Overpass](https://wiki.openstreetmap.org/wiki/Overpass_API), `overpass-api.de` by default | The ways, platforms and relations of OSM, with their versions. | None |
 | [Nominatim](https://nominatim.org) | Towns and countries, one request per second at most. | None |
 | [Découpage administratif](https://geo.api.gouv.fr/decoupage-administratif), France only | Are capitals at the start of a stop name a commune déléguée of its commune nouvelle? | None |
@@ -171,6 +174,7 @@ GTFS ──► OSM stops ──► names ──► traces ──► ways ──�
 | `src/ptna.js` | Output: the PTNA list. |
 | `src/via.js` | Output: "via" added to an `.osm` file. |
 | `src/network_fix.js` | Output: the correction of a whole network. |
+| `src/gpx.js` | Output: a walking or cycling route from a GPX track, and an OSM relation as a GPX (GPX tab). |
 
 ### Where to change what
 

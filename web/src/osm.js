@@ -138,12 +138,16 @@ export const parentRelations = (keys) => inBatches(numericIds(keys, "w"), (ids) 
 
 const bboxText = (b) => b.map((x) => x.toFixed(6)).join(",");
 
-/** OSM bus stops and platforms in a bbox (ways with their center), for stops.matchStops. */
-export const platformsIn = (box) => {
-  const b = bboxText(box);
-  return overpass(`(node[highway=bus_stop](${b});node[public_transport=platform](${b});way[public_transport=platform](${b}););out meta center;`)
+/** The zones of an area: a bbox [s, w, n, e] or a list of them (geo.zonesAround). */
+const zonesOf = (area) => (typeof area[0] === "number" ? [area] : area);
+
+/** The statements, each one once per zone of the area: (statements)(bbox). */
+const perZone = (area, statements) => zonesOf(area).flatMap((z) => statements.map((st) => `${st}(${bboxText(z)});`)).join("");
+
+/** OSM bus stops and platforms in an area (ways with their center), for stops.matchStops. */
+export const platformsIn = (area) =>
+  overpass(`(${perZone(area, ["node[highway=bus_stop]", "node[public_transport=platform]", "way[public_transport=platform]"])});out meta center;`)
     .then(fromOverpass);
-};
 
 /** The stop_positions within radius metres of these points [lat, lon], the roads they are on, and the nodes of these roads. */
 export const stopPositionsAround = (points, radius) => {
@@ -151,21 +155,25 @@ export const stopPositionsAround = (points, radius) => {
   return overpass(`(${around})->.s;.s out meta;way(bn.s)[highway]->.w;.w out meta;node(w.w);out meta;`).then(fromOverpass);
 };
 
-/** {key: object} of the stop_positions of a bbox, see stops.pairStopPositions. */
-export const stopPositionsIn = (box) => overpass(`node[public_transport=stop_position](${bboxText(box)});out meta;`).then(fromOverpass);
+/** {key: object} of the stop_positions of an area, see stops.pairStopPositions. */
+export const stopPositionsIn = (area) => overpass(`(${perZone(area, ["node[public_transport=stop_position]"])});out meta;`).then(fromOverpass);
 
 /** The roads within radius metres of these points [lat, lon], and their nodes. */
 export const roadsAround = (points, radius) => overpass(`(${points.map(([lat, lon]) => `way[highway](around:${radius},${lat},${lon});`).join("")})->.w;.w out meta;node(w.w);out meta;`).then(fromOverpass);
 
-/** Route relations of these modes with a member in a bbox, and their route masters. */
-export const routesIn = (box, modes) => {
-  const b = bboxText(box), rx = modes.filter((m) => /^\w+$/.test(m)).join("|");
-  return overpass(`relation[route~"^(${rx})$"](${b})->.r;relation(br.r)[route_master~"^(${rx})$"]->.m;(.r;.m;);out meta;`)
+/** Route relations of these modes with a member in an area, and their route masters. */
+export const routesIn = (area, modes) => {
+  const rx = modes.filter((m) => /^\w+$/.test(m)).join("|");
+  return overpass(`(${perZone(area, [`relation[route~"^(${rx})$"]`])})->.r;relation(br.r)[route_master~"^(${rx})$"]->.m;(.r;.m;);out meta;`)
     .then(fromOverpass);
 };
 
-/** Tags of the relations carrying a feed code over a whole feed: only their tags, the area can be large. */
-export const relationsWithFeedCode = (box) => overpass(`relation[~"^gtfs:route_id:"~"."](${bboxText(box)});out tags;`).then(fromOverpass);
+/** Tags of the routes and route masters carrying a feed code over a whole feed: only their tags, the area can be large. The type
+ * first: Overpass narrows with its tag index before testing every key against the pattern. */
+export const relationsWithFeedCode = (box) => {
+  const b = bboxText(box);
+  return overpass(`(${["route", "route_master"].map((t) => `relation[type=${t}][~"^gtfs:route_id:"~"."](${b});`).join("")});out tags;`).then(fromOverpass);
+};
 
 /** Nodes of the modified ways that were not read yet (a platform drawn as a way, for instance). */
 export async function completeWayNodes(obj) {

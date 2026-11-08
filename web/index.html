@@ -17,18 +17,71 @@
   <button class="home" data-view="generate" aria-label="tissway, back to the converter"><span class="logo"></span></button>
   <nav class="nav" aria-label="Pages">
     <button data-view="generate" aria-current="page">Converter</button>
+    <button data-view="gpx">GPX</button>
     <button data-view="settings">Settings <span id="settings-count" class="count" hidden></span></button>
     <label class="check theme"><input id="theme-toggle" type="checkbox" role="switch"> Dark</label>
   </nav>
 </header>
 
 <main id="view-generate" class="converter">
-  <div class="hero">
+  <div class="hero" data-mode="gtfs">
     <h1>GTFS to OSM converter</h1>
     <p>Turn a public transport feed into OpenStreetMap relations, ready to review in JOSM. No sign-up, nothing to install.</p>
   </div>
+  <div class="hero" data-mode="gpx" hidden>
+    <h1>GPX to OSM converter</h1>
+    <p>Turn a walking, hiking or cycling track into an OpenStreetMap route relation that follows the ways suited to it, ready to review in JOSM. Or get the path of any OSM route, a bus line for instance, as a GPX.</p>
+  </div>
 
   <section class="box" aria-label="Converter">
+    <div id="gpx" class="options" data-lock hidden>
+      <div id="gpx-source">
+        <label id="gpx-drop" class="drop">
+          <input id="gpx-input" type="file" accept=".gpx,application/gpx+xml">
+          <svg viewBox="0 0 24 24" width="44" height="44" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+          <span class="drop-button">Choose a GPX file</span>
+          <span class="drop-hint">or drop it here</span>
+          <span class="drop-formats">A track, a route or waypoints, recorded or drawn</span>
+        </label>
+        <div class="or"><span>or extract an OSM relation as GPX</span></div>
+        <div class="id-row">
+          <label class="sr-only" for="relation-id">OSM relation</label>
+          <input id="relation-id" placeholder="Relation id or link, e.g. 1234567" spellcheck="false" autocomplete="off">
+          <button id="relation-extract">Extract GPX</button>
+        </div>
+      </div>
+      <div id="gpx-chip" class="chip" hidden>
+        <span class="chip-mark" aria-hidden="true">✓</span>
+        <span class="chip-text"><b id="gpx-name"></b><small id="gpx-info"></small></span>
+        <button id="gpx-change" class="link">Change</button>
+      </div>
+      <div id="gpx-options" class="options" hidden>
+      <fieldset class="formats profiles">
+        <legend>Type of route</legend>
+        <label><input type="radio" name="profile" value="hiking" checked><span><b>Hiking</b><small>route=hiking</small></span></label>
+        <label><input type="radio" name="profile" value="foot"><span><b>Walking</b><small>route=foot</small></span></label>
+        <label><input type="radio" name="profile" value="bicycle"><span><b>Bike</b><small>route=bicycle</small></span></label>
+        <label><input type="radio" name="profile" value="road_bike"><span><b>Road bike</b><small>route=bicycle</small></span></label>
+        <label><input type="radio" name="profile" value="mtb"><span><b>Mountain bike</b><small>route=mtb</small></span></label>
+      </fieldset>
+      <p id="gpx-profile-hint" class="hint"></p>
+      <label class="check"><input id="gpx-adapt" type="checkbox" role="switch" checked> Adapt the path to the type of route</label>
+      <div class="pair">
+        <label>Name <input id="gpx-route-name" placeholder="from the GPX" spellcheck="false" autocomplete="off"></label>
+        <label>Ref <input id="gpx-ref" placeholder="optional" spellcheck="false" autocomplete="off"></label>
+      </div>
+      <label class="narrow">Network
+        <select id="gpx-level">
+          <option value="">None</option>
+          <option value="l">Local</option>
+          <option value="r">Regional</option>
+          <option value="n">National</option>
+          <option value="i">International</option>
+        </select>
+      </label>
+      </div>
+    </div>
+
     <div id="source" data-lock>
       <label id="drop" class="drop">
         <input id="file-input" type="file" accept=".zip,.osm,.xml,application/zip">
@@ -215,7 +268,7 @@
     </div>
   </details>
 
-  <ol class="how">
+  <ol class="how" data-mode="gtfs">
     <li><b>Add your feed</b><span>A GTFS file, or its Mobility Database ID.</span></li>
     <li><b>Pick a line</b><span>Networks and tags are found online for you.</span></li>
     <li><b>Download and review</b><span>Open the .osm file in JOSM, then upload it.</span></li>

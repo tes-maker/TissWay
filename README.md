@@ -9,7 +9,7 @@ variant, a `route_master` per line, stop_positions on the road, platforms beside
 [Valhalla](https://github.com/valhalla/valhalla). Lines already in OSM are updated in place rather than duplicated.
 Everything goes into a single `.osm` file that you review in JOSM and then upload.
 
-**Use it online: <https://tes-maker.github.io/TissWay/>**
+**Use it online: <https://tes-maker.github.io/TissWay/>**, each tab with its own address: [/gtfs](https://tes-maker.github.io/TissWay/gtfs), [/gpx](https://tes-maker.github.io/TissWay/gpx), [/settings](https://tes-maker.github.io/TissWay/settings).
 
 It is a static site in plain JavaScript: no server, no dependency, no build step.
 
@@ -72,6 +72,27 @@ coordinates are often tens of metres off), else at the projection of the GTFS st
 - a stop_position only carries `public_transport=stop_position`, `bus=yes` (or `trolleybus=yes`, and `coach=yes` for coaches), `name`, the name of the stop, and its `local_ref` if it has one. What an existing one has
   more goes to its platform when the platform lacks it (a platform created takes nothing from it: the stop_position keeps it) (`shelter`, `bench`…; its `ref` and ids only if it serves a single stop), and `direction` and `highway=bus_stop` are dropped. What
   describes something else on the node stays: `highway=traffic_signals`, `crossing`, `barrier`, `note`… A stop_position is shared by every route on that way, whatever its network.
+
+### Walking and cycling routes (GPX tab)
+
+The **GPX** tab turns a track (recorded or drawn: tracks, else routes, else waypoints) into a `route=hiking`, `foot`, `bicycle`
+or `mtb` relation, with the type of route chosen: hiking, walking, bike, road bike, mountain bike. The track is map-matched with
+Valhalla's pedestrian or bicycle costing for that type. Then, with **Adapt the path to the type of route** (on by default):
+
+- an anchor is taken every 400 m along the matched path, and moved onto a better suited way within 30 m, parallel to the path
+  (not onto a crossing): the cycleway beside the road for a cyclist, the footway or sidewalk for a walker, a path for a hiker;
+- the path is routed through the anchors with the same profile, and each piece routed again replaces the matched one only if it
+  stays within 40 m of it, is not more than 30 % longer, and runs more on the ways the type of route prefers. A cycleway already
+  followed is never left for the road;
+- where a piece kept meets a piece changed, the anchor goes back on the matched path and the change is routed again from it, so the
+  route joins the cycleway where the network allows it instead of jumping across.
+
+The ways are split where the route enters or leaves them, like for the public transport routes. You get the `.osm` and the path
+on the ways as a `.gpx`. With **Network calls** on in the Activity log, each piece shows how well it suited the profile before and after.
+
+In the same tab, **Extract GPX** gives the path of any OSM route relation, a bus line for instance, from its id or its link: its ways put
+end to end in travel order (a roundabout drawn whole is followed from its entry to its exit), its stops (else its platforms) as
+waypoints. A `route_master` gives one track per route; a gap between ways starts a new segment and is reported.
 
 ### Correcting a whole network
 

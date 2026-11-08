@@ -2,6 +2,7 @@
 // In the browser console, window.tissway gives access to the settings, the feed and everything computed by the last run.
 
 import { applySettings, el, fitSecrets, initSettings, modifiedCount, setOption } from "./settings_form.js";
+import { PROFILES, parseGpx, relationId, relationToGpx, runGpx } from "./src/gpx.js";
 import { Feed } from "./src/gtfs.js";
 import { agencyNetworks, slug } from "./src/naming.js";
 import { clearCaches, downloadGtfs, feedUrls, services } from "./src/net.js";
@@ -19,7 +20,7 @@ import { renameInFile } from "./src/via.js";
 const $ = (id) => document.getElementById(id);
 const FEED_STORE = "tissway.feed";
 
-const state = { feed: null, viaFile: null, loading: false, routes: [], networks: new Map(), line: null, controller: null, urls: [], warnings: 0 };
+const state = { mode: "gtfs", gpx: null, feed: null, viaFile: null, loading: false, routes: [], networks: new Map(), line: null, controller: null, urls: [], warnings: 0 };
 window.tissway = { state, settings, services, log };
 
 // --- log --------------------------------------------------------------------------------------------------
@@ -49,14 +50,20 @@ function showError(message) {
 
 /** The parts of the box that depend on what is loaded and on what is running. */
 function refresh() {
-  const busy = Boolean(state.controller), ready = Boolean(state.feed || state.viaFile);
-  $("source").hidden = ready || state.loading;
+  const busy = Boolean(state.controller), gpx = state.mode === "gpx";
+  const ready = gpx ? Boolean(state.gpx) : Boolean(state.feed || state.viaFile);
+  $("source").hidden = gpx || ready || state.loading;
   $("gtfs-load").disabled = busy;
-  $("chip").hidden = !ready;
+  $("chip").hidden = gpx || !ready;
   $("chip-change").disabled = busy;
-  $("loading").hidden = !state.loading;
-  $("options").hidden = !state.feed;
-  $("via").hidden = !state.viaFile;
+  $("loading").hidden = gpx || !state.loading;
+  $("options").hidden = gpx || !state.feed;
+  $("via").hidden = gpx || !state.viaFile;
+  $("gpx").hidden = !gpx;
+  $("gpx-source").hidden = Boolean(state.gpx);
+  $("gpx-chip").hidden = !state.gpx;
+  $("gpx-options").hidden = !state.gpx;
+  for (const part of document.querySelectorAll("[data-mode]")) part.hidden = part.dataset.mode !== state.mode;
   $("action").hidden = !ready || busy;
   $("working").hidden = !busy || state.loading;
   // during a run, only Cancel acts on it: what it reads must not change under it
@@ -448,6 +455,13 @@ function operatorLabel(line) {
 /** The label of the big button says what it will do, and why it cannot yet. */
 function refreshConvert() {
   const button = $("convert");
+  if (state.mode === "gpx") {
+    const profile = PROFILES[gpxProfile()];
+    $("gpx-profile-hint").textContent = PROFILE_HINTS[gpxProfile()];
+    button.textContent = `Convert the track to a ${profile.label.toLowerCase()} route (.osm)`;
+    button.disabled = !state.gpx;
+    return;
+  }
   if (state.viaFile) {
     button.textContent = "Add “via” to the names";
     button.disabled = false;
@@ -465,6 +479,68 @@ function refreshConvert() {
   };
   button.textContent = labels[format()];
   button.disabled = !$("network").value || (format() === "routes" && !line) || (format() === "operator" && !operator.ready);
+}
+
+// --- GPX --------------------------------------------------------------------------------------------------
+
+const gpxProfile = () => document.querySelector("[name=profile]:checked").value;
+
+/** What adapting the path does for each profile. */
+const PROFILE_HINTS = {
+  hiking: "Footpaths, tracks and trails, mountain paths included, rather than roads.",
+  foot: "Pavements, footways and pedestrian streets; no mountain paths.",
+  bicycle: "Cycleways and cycle lanes first: the cycleway beside the road rather than the road, quiet streets otherwise.",
+  road_bike: "Cycleways and quiet roads, paved surfaces only.",
+  mtb: "Tracks and paths open to bikes, unpaved surfaces welcome.",
+};
+
+/** A GPX file was chosen or dropped: read at once, converted with the button. */
+async function takeGpx(file) {
+  if (!file || state.controller) return;
+  hideResult();
+  try {
+    const text = await file.text();
+    const track = parseGpx(text);
+    state.gpx = { file, text, track };
+    $("gpx-name").textContent = track.name || file.name;
+    $("gpx-info").textContent = `${file.name} · ${track.points.length} points`;
+    $("gpx-route-name").placeholder = track.name || "name of the route";
+  } catch (e) {
+    showError(`${file.name}: ${e.message}`);
+  }
+  refresh();
+}
+
+function resetGpx() {
+  state.gpx = null;
+  $("gpx-input").value = "";
+  $("gpx-route-name").value = "";
+  $("gpx-route-name").placeholder = "from the GPX";
+  hideResult();
+  refresh();
+}
+
+/** The path of an OSM relation (a bus line, a hiking trail, a route_master) as a GPX. */
+function extractRelation() {
+  if (!relationId($("relation-id").value)) {
+    showError("Enter the id of an OSM relation, or a link to it.");
+    return;
+  }
+  hideResult();
+  task(async () => {
+    const { gpx, filename, summary } = await relationToGpx($("relation-id").value, { onProgress: progress });
+    showResult({ files: [{ name: filename, text: gpx, type: "application/gpx+xml" }], summary });
+  });
+}
+
+async function exportGpx() {
+  const { file, text } = state.gpx;
+  const result = await runGpx(text, {
+    profile: gpxProfile(), adapt: $("gpx-adapt").checked, name: $("gpx-route-name").value, ref: $("gpx-ref").value,
+    level: $("gpx-level").value, fileName: file.name, onProgress: progress,
+  });
+  window.tissway.last = result.state;
+  showResult({ files: [osmFile(result.filename, result.xml), { name: result.gpxName, text: result.gpx, type: "application/gpx+xml" }], summary: result.summary });
 }
 
 // --- exports ----------------------------------------------------------------------------------------------
@@ -549,13 +625,46 @@ async function exportVia() {
 
 // --- events -----------------------------------------------------------------------------------------------
 
-function selectView(name) {
+// --- address ----------------------------------------------------------------------------------------------
+//
+// Each tab has its address: …/gtfs, …/gpx, …/settings. A static host has no file there: 404.html sends them to the site as ?view=,
+// and the address is put back.
+
+const PAGES = { generate: "gtfs", gpx: "gpx", settings: "settings" };
+const VIEWS = Object.fromEntries(Object.entries(PAGES).map(([view, page]) => [page, view]));
+
+/** Folder of the site: the address without its tab ("/TissWay/"). */
+const siteBase = () => location.pathname.replace(/(?:index\.html|gtfs|gpx|settings)\/?$/, "");
+
+/** The tab the address asks for, the converter by default. */
+function viewFromAddress() {
+  const asked = new URLSearchParams(location.search).get("view") ?? /([^/]*)\/?$/.exec(location.pathname)[1];
+  return VIEWS[asked] ?? "generate";
+}
+
+/** The address of the tab shown: a new entry in the history when the user changes tab, else the same one corrected. */
+function showAddress(name, push) {
+  const url = `${siteBase()}${PAGES[name]}${location.hash}`;
+  if (url === `${location.pathname}${location.hash}` && !location.search) return;
+  history[push ? "pushState" : "replaceState"]({ view: name }, "", url);
+}
+
+function selectView(name, { push = true } = {}) {
+  // during a run, its page stays the one of the converter: the run shows there
+  if (state.controller && name !== "settings") name = state.mode === "gpx" ? "gpx" : "generate";
+  showAddress(name, push);
   for (const b of document.querySelectorAll("[data-view]")) {
     if (b.dataset.view === name) b.setAttribute("aria-current", "page");
     else b.removeAttribute("aria-current");
   }
-  $("view-generate").hidden = name !== "generate";
+  $("view-generate").hidden = name === "settings";
   $("view-settings").hidden = name !== "settings";
+  const mode = name === "gpx" ? "gpx" : name === "generate" ? "gtfs" : state.mode;
+  if (mode !== state.mode) {
+    state.mode = mode;
+    hideResult();
+  }
+  refresh();
   if (name === "settings") fitSecrets();
   scrollTo(0, 0);
 }
@@ -575,11 +684,12 @@ const EXPORTS = { routes: exportRoutes, platforms: exportPlatforms, ptna: export
 
 function convert() {
   hideResult();
-  task(state.viaFile ? exportVia : EXPORTS[format()]);
+  task(state.mode === "gpx" ? exportGpx : state.viaFile ? exportVia : EXPORTS[format()]);
 }
 
 function wire() {
   for (const b of document.querySelectorAll("[data-view]")) b.addEventListener("click", () => selectView(b.dataset.view));
+  addEventListener("popstate", () => selectView(viewFromAddress(), { push: false }));
   $("gtfs-load").addEventListener("click", loadById);
   $("gtfs-id").addEventListener("keydown", (e) => { if (e.key === "Enter") loadById(); });
   $("file-input").addEventListener("change", (e) => takeFile(e.target.files[0]));
@@ -589,7 +699,8 @@ function wire() {
   $("cancel-load").addEventListener("click", () => state.controller?.abort());
   $("settings-cancel").addEventListener("click", () => state.controller?.abort());
   $("again").addEventListener("click", () => {
-    reset();
+    if (state.mode === "gpx") resetGpx();
+    else reset();
     scrollTo(0, 0);
   });
   $("show-warnings").addEventListener("click", () => {
@@ -599,18 +710,28 @@ function wire() {
     $("log-box").scrollIntoView({ block: "nearest" });
   });
 
-  const drop = $("drop");
-  for (const type of ["dragenter", "dragover"]) {
-    drop.addEventListener(type, (e) => {
+  for (const [id, take] of [["drop", takeFile], ["gpx-drop", takeGpx]]) {
+    const drop = $(id);
+    for (const type of ["dragenter", "dragover"]) {
+      drop.addEventListener(type, (e) => {
+        e.preventDefault();
+        drop.classList.add("over");
+      });
+    }
+    drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+    drop.addEventListener("drop", (e) => {
       e.preventDefault();
-      drop.classList.add("over");
+      drop.classList.remove("over");
+      take(e.dataTransfer.files[0]);
     });
   }
-  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
-  drop.addEventListener("drop", (e) => {
-    e.preventDefault();
-    drop.classList.remove("over");
-    takeFile(e.dataTransfer.files[0]);
+  $("gpx-input").addEventListener("change", (e) => takeGpx(e.target.files[0]));
+  $("gpx-change").addEventListener("click", resetGpx);
+  $("relation-extract").addEventListener("click", extractRelation);
+  $("relation-id").addEventListener("keydown", (e) => { if (e.key === "Enter") extractRelation(); });
+  for (const radio of document.querySelectorAll("[name=profile]")) radio.addEventListener("change", () => {
+    hideResult();
+    refreshConvert();
   });
   // a file dropped next to the zone must not replace the page
   for (const type of ["dragover", "drop"]) addEventListener(type, (e) => e.preventDefault());
@@ -679,4 +800,4 @@ try {
 wire();
 showSettingsCount();
 showOptions();
-refresh();
+selectView(viewFromAddress(), { push: false });
