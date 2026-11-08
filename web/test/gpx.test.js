@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import "./helpers.js";
-import { PROFILES, adaptPath, anchorIndices, chainWays, fits, parseGpx, relationId, routeTags, snapAnchors, valhalla, writeGpx, writeTracks } from "../src/gpx.js";
+import { PROFILES, adaptPath, anchorIndices, chainWays, fits, hexColour, parseGpx, relationId, routeTags, snapAnchors, valhalla, writeGpx, writeTracks } from "../src/gpx.js";
 
 const DEG_PER_M = 1 / 111_320; // in longitude at the equator, in latitude almost
 
@@ -168,6 +168,21 @@ test("GPX of several tracks, segments and waypoints", () => {
   const text = writeTracks([{ name: "Bus 1: A → B", segments: [[[1, 2], [3, 4]], [[5, 6], [7, 8]]] }, { name: "Bus 1: B → A", segments: [[[7, 8], [1, 2]]] }], [{ lat: 1, lon: 2, name: "A & co" }]);
   assert.equal(text.match(/<trk>/g).length, 2);
   assert.equal(text.match(/<trkseg>/g).length, 3);
-  assert.match(text, /<wpt lat="1.0000000" lon="2.0000000"><name>A &amp; co<\/name><\/wpt>/);
+  assert.match(text, /<wpt lat="1.0000000" lon="2.0000000"><name>A &amp; co<\/name><extensions>.*<\/extensions><\/wpt>/);
   assert.deepEqual(parseGpx(text).points, [[1, 2], [3, 4], [5, 6], [7, 8], [7, 8], [1, 2]].filter((p, i, a) => i === 0 || p.join() !== a[i - 1].join()));
+});
+
+test("tracks in the colour of their line, stops as white dots circled with black", () => {
+  const text = writeTracks([{ name: "Bus 1", segments: [[[1, 2], [3, 4]]], colour: "#E3001B" }, { name: "Bus 2", segments: [[[1, 2], [3, 4]]], colour: "" }],
+    [{ lat: 1, lon: 2, name: "A" }]);
+  assert.match(text, /<trk><name>Bus 1<\/name><extensions><gpx_style:line><gpx_style:color>E3001B<\/gpx_style:color>.*<osmand:color>#e3001b<\/osmand:color>/);
+  assert.match(text, /<trk><name>Bus 2<\/name>\n/); // no colour: the app's own
+  const wpt = /<wpt[\s\S]*?<\/wpt>/.exec(text)[0];
+  assert.match(wpt, /<gpx_style:line><gpx_style:color>000000<\/gpx_style:color><\/gpx_style:line><gpx_style:fill><gpx_style:color>FFFFFF/);
+  assert.match(wpt, /<osmand:color>#ffffff<\/osmand:color>/);
+  assert.match(text, /xmlns:gpx_style=.*xmlns:osmand=/);
+});
+
+test("OSM colours as rrggbb", () => {
+  assert.deepEqual(["#E3001B", "e3001b", "#e30", "Red", " navy ", "rouge", "", undefined].map(hexColour), ["e3001b", "e3001b", "ee3300", "ff0000", "000080", "", "", ""]);
 });

@@ -30,7 +30,7 @@ import { refSortKey } from "./gtfs.js";
 import { stopKey } from "./naming.js";
 import { isNew, newKey } from "./osm.js";
 import { settings } from "./settings.js";
-import { listIn, log, minBy, sameTags, setList, sortedBy, splitTag } from "./util.js";
+import { listIn, log, minBy, sameTags, setList, sortedBy, splitTag, unique } from "./util.js";
 
 export const VEHICLE = { bus: "bus", coach: "bus", trolleybus: "trolleybus" };
 const OTHER_VEHICLES = ["tram", "train", "subway", "light_rail", "monorail", "ferry", "funicular"];
@@ -603,6 +603,46 @@ export function nameNumberedNetworkTags(t) {
     if (!(target in t)) t[target] = t[key];
     delete t[key];
   }
+  mergeSameNetworks(t);
+}
+
+/** network:wikidata of the network named so on these tags (the main one, or one of network:<n>). */
+const wikidataOf = (t, name) => (name === t.network ? t["network:wikidata"] : t[refKeyFor("network:wikidata", name)]);
+
+/** Keys of the data of a network that follow its name when it is not the main one: ref:<name>, network:wikidata:<name>... */
+const namedBases = (t) => unique(["ref", "local_ref", ...settings.stop_ref_tags, ...NETWORK_KEYS.slice(1),
+  ...Object.keys(t).map((k) => /^gtfs:stop_code(?::[A-Z][A-Z][a-zA-Z0-9_.-]+)?(?=:)/.exec(k)?.[0]).filter(Boolean)]);
+
+/** Move the data named after the network old to the main network (into "") or to the name into. A value the target has already
+ * stays where it is, unless it is the same. */
+function moveNamedData(t, old, into = "") {
+  for (const base of namedBases(t)) {
+    const from = refKeyFor(base, old), to = into ? refKeyFor(base, into) : base;
+    if (!(from in t) || from === to) continue;
+    if (!(to in t)) t[to] = t[from];
+    if (t[to] === t[from]) delete t[from];
+  }
+}
+
+/** One network under two names on one object, "Nomad" and network:2=Nomad Car with the same network:wikidata (or twice the same name):
+ * a single network, the main one. Its data under the second name goes back to the main keys, and nothing is left named after the main
+ * network itself (network:wikidata:Nomad_Car next to network=Nomad Car). */
+function mergeSameNetworks(t) {
+  if (!t.network) return;
+  const main = t["network:wikidata"];
+  const numbered = numberedNetworks(t);
+  for (const slot of numbered) {
+    const name = t[slot];
+    if (name !== t.network && !(main && wikidataOf(t, name) === main)) continue;
+    moveNamedData(t, name);
+    delete t[slot];
+  }
+  moveNamedData(t, t.network);
+  const left = numberedNetworks(t);
+  if (left.length === numbered.length) return;
+  const names = left.map((k) => t[k]);
+  for (const k of left) delete t[k];
+  names.forEach((name, i) => { t[`network:${i + 2}`] = name; });
 }
 
 const STOP_KEY = /^gtfs:stop_(?:id|name|code)(?::|$)/;
@@ -707,9 +747,18 @@ export function enrich(obj, key, tags, sizes = null, ofStop = new Map()) {
   if (t[stopNameKey]) {
     setList(t, stopNameKey, t[stopNameKey].split(";").map((v) => v.trim()).filter((v) => v !== tags.name));
   }
-  let suffix = "", n = 1;
-  while ((t[`network${suffix}`] ?? tags.network) !== tags.network) suffix = `:${++n}`;
+  // the slot of this network: its name, or another name with the same network:wikidata ("Nomad" for "Nomad Car"), which then takes the
+  // name of the relations written; else the first free one
   const incoming = tags.network;
+  const sameNetwork = (name) => name === undefined || name === incoming
+    || (tags["network:wikidata"] !== undefined && wikidataOf(t, name) === tags["network:wikidata"]);
+  let suffix = "", n = 1;
+  while (!sameNetwork(t[`network${suffix}`])) suffix = `:${++n}`;
+  const old = t[`network${suffix}`];
+  if (old !== undefined && old !== incoming) {
+    if (suffix) moveNamedData(t, old, incoming);
+    t[`network${suffix}`] = incoming;
+  }
   const current = t.network;
   for (const [k, v] of Object.entries(tags)) {
     if (k === "network") t[k + suffix] = v;

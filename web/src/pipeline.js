@@ -11,12 +11,13 @@
 // 6. ways split where routes enter or leave them, once for all the lines (splitting.splitWays);
 // 7. a single .osm text is written (objects shared between lines: no conflict on upload).
 
+import { borrowable, borrowedTrace, guidedPath } from "./borrow.js";
 import { buildLine } from "./build.js";
 import { detectStopRefTags, feedCodeOf, networkFromOsm } from "./detect.js";
 import { ExistingRoutes, WIKI_KEYS } from "./existing.js";
 import { inZones, latlon, zonesAround } from "./geo.js";
 import { lineVariants, refSortKey, stopSequences } from "./gtfs.js";
-import { matchVariant } from "./matching.js";
+import { matchVariant, valhalla } from "./matching.js";
 import { keepTraces, reachStopPositions, terminusRoads } from "./reuse.js";
 import { lookup } from "./lookup.js";
 import { accentsFrom, agencyNetworks, cleanStopName, fixAccents, nameKey, slug, stopLabel, stopNames, words } from "./naming.js";
@@ -109,7 +110,7 @@ async function mapLines(feed, routes, trips, stops, networks, existing, onProgre
   for (const t of trips) listIn(byRoute, t.route_id).push(t);
   const pending = routes.map((route) => [route, lineVariants(byRoute.get(route.route_id) || [])]);
   const total = pending.reduce((n, [, vs]) => n + vs.length, 0);
-  const keptOf = new Map();
+  const keptOf = new Map(), lentTo = new Map();
   let roads = {}, done = 0;
   for (const [route, found] of pending) {
     const label = route.route_short_name || route.route_id;
@@ -117,7 +118,9 @@ async function mapLines(feed, routes, trips, stops, networks, existing, onProgre
     const network = (networks[route.agency_id] || { network: route.agency_id || "GTFS" }).network;
     const { kept, roads: read } = await keepTraces(route, found, network, existing, stops);
     keptOf.set(route, kept);
-    roads = { ...roads, ...read };
+    const lent = await borrowable(route, found.filter((v) => !kept.has(v)), existing, stops);
+    lentTo.set(route, lent);
+    roads = { ...roads, ...read, ...lent.roads };
     if (kept.size) log.info(`line ${label}: ${kept.size} of ${found.length} trace(s) kept from OSM: ${[...kept.values()].map(([k]) => k).join(", ")}`);
   }
   const shapes = await feed.shapes(pending.flatMap(([route, vs]) => vs.filter((v) => !keptOf.get(route).has(v)).map((v) => v.shape_id).filter(Boolean)));
@@ -132,8 +135,16 @@ async function mapLines(feed, routes, trips, stops, networks, existing, onProgre
         variants.push({ ...v, ways, source: "existing", kept_from, complete });
         continue;
       }
+      const lent = lentTo.get(route), pieces = lent.pieces(v), positions = stops.positions(v.seq);
+      const borrowed = borrowedTrace(v, pieces, lent.obj, positions, shapes.get(v.shape_id));
+      if (borrowed) {
+        log.info(`  line ${label}, trip ${v.trip_id}: trace of the other lines serving the same stops (${unique(pieces.map((p) => p.relation)).join(", ")})`);
+        variants.push({ ...v, ways: borrowed, source: "borrowed" });
+        continue;
+      }
       try {
-        const [ways, source] = await matchVariant(shapes.get(v.shape_id), stops.positions(v.seq), matched);
+        const guided = pieces.length ? (ps) => guidedPath(pieces, lent.obj, ps, valhalla.routeThrough) : undefined;
+        const [ways, source] = await matchVariant(shapes.get(v.shape_id), positions, matched, guided);
         variants.push({ ...v, ways, source });
       } catch (e) {
         if (e.name === "AbortError") throw e;
@@ -365,6 +376,7 @@ export async function runRoutes(feed, { network = null, ref = null, onProgress =
   await completeWayNodes(obj);
   const review = reviewRefs(obj, { ...owners, stops: await feed.stops(), feed: activeFeed(), network: networks[lines[0][0].agency_id]?.network ?? (lines[0][0].agency_id || "GTFS") });
 
-  const summary = { lines: lines.length, variants: variants.length, stops: used.length, "kept traces": variants.filter((v) => v.kept_from).length, "complete relations": variants.filter((v) => v.complete).length };
+  const summary = { lines: lines.length, variants: variants.length, stops: used.length, "kept traces": variants.filter((v) => v.kept_from).length,
+    "borrowed traces": variants.filter((v) => v.source === "borrowed").length, "complete relations": variants.filter((v) => v.complete).length };
   return { get xml() { return writeOsm(obj); }, review, filename: outputName(network, routes), detected, summary, state: { routes, trips, stops, lines, obj, networks, assignments } };
 }

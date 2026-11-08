@@ -116,14 +116,41 @@ const escapeXml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").
 
 const trkpt = ([lat, lon]) => `      <trkpt lat="${lat.toFixed(7)}" lon="${lon.toFixed(7)}" />`;
 
-/** A GPX text of tracks [{name, segments: [[[lat, lon]]]}] and waypoints [{lat, lon, name}]. */
+// The colour of a line in the CSS names OSM's colour=* often uses; anything else is written as #rrggbb.
+const NAMED_COLOURS = {
+  black: "000000", white: "ffffff", red: "ff0000", green: "008000", blue: "0000ff", yellow: "ffff00", orange: "ffa500", purple: "800080",
+  pink: "ffc0cb", brown: "a52a2a", grey: "808080", gray: "808080", silver: "c0c0c0", maroon: "800000", navy: "000080", teal: "008080",
+  olive: "808000", lime: "00ff00", aqua: "00ffff", cyan: "00ffff", fuchsia: "ff00ff", magenta: "ff00ff", violet: "ee82ee", gold: "ffd700",
+  darkgreen: "006400", darkblue: "00008b", darkred: "8b0000", lightblue: "add8e6", lightgreen: "90ee90", skyblue: "87ceeb",
+};
+
+/** "rrggbb" of an OSM colour=* value ("#E3001B", "#e30", "red"), or "" when it is not a colour. */
+export function hexColour(value) {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (NAMED_COLOURS[v]) return NAMED_COLOURS[v];
+  const hex = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/.exec(v)?.[1];
+  return hex?.length === 3 ? [...hex].map((c) => c + c).join("") : hex ?? "";
+}
+
+// Styles in the extensions read by the apps: gpx_style (gpx.studio, Locus...) and OsmAnd's. A stop: a white dot circled with black.
+const STYLE_NS = 'xmlns:gpx_style="http://www.topografix.com/GPX/gpx_style/0/2" xmlns:osmand="https://osmand.net"';
+const trackStyle = (hex) => (hex
+  ? `<extensions><gpx_style:line><gpx_style:color>${hex.toUpperCase()}</gpx_style:color><gpx_style:width>4</gpx_style:width></gpx_style:line>`
+    + `<osmand:color>#${hex}</osmand:color><osmand:width>bold</osmand:width></extensions>`
+  : "");
+const STOP_STYLE = "<extensions><gpx_style:line><gpx_style:color>000000</gpx_style:color></gpx_style:line>"
+  + "<gpx_style:fill><gpx_style:color>FFFFFF</gpx_style:color></gpx_style:fill>"
+  + "<osmand:color>#ffffff</osmand:color><osmand:background>circle</osmand:background></extensions>";
+
+/** A GPX text of tracks [{name, segments: [[[lat, lon]]], colour}] and waypoints [{lat, lon, name}]: each track in its colour (an OSM
+ * colour=*, none if empty), the waypoints as white dots circled with black. */
 export function writeTracks(tracks, waypoints = []) {
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    '<gpx version="1.1" creator="tissway" xmlns="http://www.topografix.com/GPX/1/1">',
-    ...waypoints.map((w) => `  <wpt lat="${w.lat.toFixed(7)}" lon="${w.lon.toFixed(7)}">${w.name ? `<name>${escapeXml(w.name)}</name>` : ""}</wpt>`),
-    ...tracks.flatMap(({ name, segments }) => [
-      `  <trk>${name ? `<name>${escapeXml(name)}</name>` : ""}`,
+    `<gpx version="1.1" creator="tissway" xmlns="http://www.topografix.com/GPX/1/1" ${STYLE_NS}>`,
+    ...waypoints.map((w) => `  <wpt lat="${w.lat.toFixed(7)}" lon="${w.lon.toFixed(7)}">${w.name ? `<name>${escapeXml(w.name)}</name>` : ""}${STOP_STYLE}</wpt>`),
+    ...tracks.flatMap(({ name, segments, colour }) => [
+      `  <trk>${name ? `<name>${escapeXml(name)}</name>` : ""}${trackStyle(hexColour(colour))}`,
       ...segments.flatMap((seg) => ["    <trkseg>", ...dedupePoints(seg).map(trkpt), "    </trkseg>"]),
       "  </trk>",
     ]),
@@ -473,7 +500,7 @@ export async function relationToGpx(text, { onProgress = () => {} } = {}) {
       continue;
     }
     if (segments.length > 1) log.warn(`${name}: ${segments.length - 1} gap(s) between its ways, written as separate segments (to check in OSM)`);
-    tracks.push({ name, segments });
+    tracks.push({ name, segments, colour: route.tags?.colour || top.tags?.colour || "" });
     const nodes = route.members.filter((m) => m.type === "node");
     const stops = nodes.filter((m) => m.role.startsWith("stop"));
     for (const m of stops.length ? stops : nodes.filter((x) => x.role.startsWith("platform"))) {

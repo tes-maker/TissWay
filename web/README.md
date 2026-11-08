@@ -139,7 +139,7 @@ GTFS ──► OSM stops ──► names ──► traces ──► ways ──�
 | OSM stops | Platforms read around the stops, candidates of each GTFS stop, conventions of the feed. | `stops.js`, `detect.js` |
 | Names | Punctuation, accents, then `name`, `official_name` and the labels of the titles. | `naming.js`, `lookup.js` |
 | Existing relations | Relations of the area, network tags, feed code. | `existing.js`, `detect.js` |
-| Traces | A complete relation stays as it is, a good trace is kept, otherwise Valhalla matches the variant. | `reuse.js`, `matching.js` |
+| Traces | A complete relation stays as it is, a good trace is kept, else the traces of other lines serving the same stops in a row are borrowed, otherwise Valhalla matches the variant. | `reuse.js`, `borrow.js`, `matching.js` |
 | Ways | The travelled ways, and the road just beyond a terminus holding its stop_position. | `osm.js`, `reuse.js` |
 | Relations | stop_position and platform of each stop, trace cut down to the termini, `route` and `route_master`, new or updated. | `build.js`, `platforms.js`, `existing.js` |
 | Platform tags | GTFS and network tags, one ref per network. | `platforms.js` |
@@ -158,6 +158,7 @@ GTFS ──► OSM stops ──► names ──► traces ──► ways ──�
 | `src/stops.js` | GTFS stops, their candidate platforms, their neighbours and rivals. |
 | `src/naming.js` | Stop names, networks, titles of the relations. |
 | `src/reuse.js` | Is the trace or the whole relation in OSM good? Then it is kept. The road beyond a terminus. |
+| `src/borrow.js` | Pieces of the traces of other lines that serve the same stops one after the other: the whole trace, or a guide for Valhalla. |
 | `src/matching.js` | Valhalla: shape, or route through the stops when the shape is wrong. |
 | `src/platforms.js` | Kerb side, stop_position placement, tags of the platforms. The rules are listed at the top of the file. |
 | `src/build.js` | The relations of a line. |

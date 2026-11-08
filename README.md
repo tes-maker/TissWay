@@ -44,6 +44,14 @@ matched on OSM with Valhalla:
 
 The Activity log says which variants were routed through their stops.
 
+A variant without a good trace of its own in OSM first looks at the relations already mapped around it, of any bus or coach line
+(`borrow_traces`, on by default). Between two stops that another line serves one after the other, with no stop in between, the bus
+takes the same road:
+
+- every pair of consecutive stops covered: the variant is made of these pieces, without Valhalla, if the whole can be travelled and
+  agrees with the GTFS shape when there is one;
+- some pairs only: when the variant is routed through its stops, Valhalla follows these pieces and routes the rest.
+
 ### stop_positions
 
 Each stop gets a stop_position on the travelled way, in front of the existing OSM platform used (GTFS
