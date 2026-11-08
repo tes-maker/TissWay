@@ -732,3 +732,30 @@ test("a stop_position keeps its local_ref: it tells which bay it is", () => {
   assert.deepEqual(stopPositionOnly({ public_transport: "stop_position", bus: "yes", local_ref: "C", ref: "14CAE09C" }, "Gare Routière").tags,
     { public_transport: "stop_position", bus: "yes", local_ref: "C", name: "Gare Routière" });
 });
+
+const NOMAD_WIKI = { "network:wikidata": "Q98131290", "network:wikipedia": "fr:Nomad (réseau)" };
+
+test("enrich: another name with the same network:wikidata is the same network, renamed after the relations", () => {
+  const obj = new Store({ nP: node(49, 1, { network: "Nomad", ...NOMAD_WIKI, ref: "A" }) });
+  enrich(obj, "nP", { network: "Nomad Car", ...NOMAD_WIKI, ref: "A", name: "Gare" });
+  const t = obj.get("nP").tags;
+  assert.deepEqual(Object.keys(t).filter((k) => k.startsWith("network")).sort(), ["network", "network:wikidata", "network:wikipedia"]);
+  assert.deepEqual([t.network, t.ref], ["Nomad Car", "A"]);
+});
+
+test("enrich: a second network of that name is merged into the main one, and nothing stays named after the main network", () => {
+  const obj = new Store({ nP: node(49, 1, { network: "Nomad Car", ...NOMAD_WIKI, "network:2": "Twisto", "network:3": "Nomad", "network:wikidata:Nomad": "Q98131290",
+    "ref:Nomad": "A", "network:wikidata:Nomad_Car": "Q98131290", "network:wikidata:Twisto": "Q3537947" }) });
+  enrich(obj, "nP", { network: "Nomad Car", ...NOMAD_WIKI, name: "Gare" });
+  const t = obj.get("nP").tags;
+  assert.deepEqual([t.network, t["network:2"], t["network:3"], t.ref, t["ref:Nomad"]], ["Nomad Car", "Twisto", undefined, "A", undefined]);
+  assert.ok(!("network:wikidata:Nomad_Car" in t) && !("network:wikidata:Nomad" in t));
+  assert.equal(t["network:wikidata:Twisto"], "Q3537947");
+});
+
+test("enrich: two networks with their own wikidata stay two", () => {
+  const obj = new Store({ nP: node(49, 1, { network: "Twisto", "network:wikidata": "Q3537947" }) });
+  enrich(obj, "nP", { network: "Nomad Car", ...NOMAD_WIKI, name: "Gare" });
+  const t = obj.get("nP").tags;
+  assert.deepEqual([t.network, t["network:2"], t["network:wikidata:Nomad_Car"]], ["Twisto", "Nomad Car", "Q98131290"]);
+});

@@ -92,6 +92,27 @@ export function bbox(points, pad_m = 0) {
 
 export const inBbox = ([lat, lon], [s, w, n, e]) => lat >= s && lat <= n && lon >= w && lon <= e;
 
+const ZONE_CELL_M = 2000;
+const areaOf = ([s, w, n, e]) => (n - s) * (e - w);
+
+/** [[s, w, n, e]] around the points, grown by pad_m: one bbox, or one per cell of ZONE_CELL_M when they cover much less (a long
+ * line through the countryside), so that Overpass does not read the whole region between its stops. */
+export function zonesAround(points, pad_m = 0) {
+  const whole = bbox(points, pad_m);
+  const cellLon = ZONE_CELL_M / (M_PER_DEG_LON * Math.cos(Math.max(Math.abs(whole[0]), Math.abs(whole[2])) * RAD));
+  const cells = new Map();
+  for (const p of points) {
+    const key = `${Math.floor(p[0] * M_PER_DEG_LAT / ZONE_CELL_M)},${Math.floor(p[1] / cellLon)}`;
+    if (!cells.has(key)) cells.set(key, []);
+    cells.get(key).push(p);
+  }
+  const zones = [...cells.values()].map((ps) => bbox(ps, pad_m));
+  return zones.reduce((sum, z) => sum + areaOf(z), 0) < areaOf(whole) / 2 ? zones : [whole];
+}
+
+/** Is p in one of the zones? */
+export const inZones = (p, zones) => zones.some((z) => inBbox(p, z));
+
 /** Spatial grid: within(p, m) gives the items of at(item) closer than m metres (cell_m >= m expected). */
 export class Grid {
   constructor(items, at, cell_m) {

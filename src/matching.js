@@ -71,8 +71,9 @@ function farShare(stops, path) {
 }
 
 /** [ways, source] of a variant: shape or null, stops in order. source is "shape" or "stops" (routed through the
- * stops because the shape is missing, unusable or wrong). Throws if neither works. matched: what each shape already gave, to ask Valhalla once per shape. */
-export async function matchVariant(shape, stops, matched = new Map()) {
+ * stops because the shape is missing, unusable or wrong). Throws if neither works. matched: what each shape already gave, to ask Valhalla once per shape.
+ * routeThrough: path through the stops, by default routed by Valhalla (borrow.guidedPath follows the traces of other lines where it can). */
+export async function matchVariant(shape, stops, matched = new Map(), routeThrough = valhalla.routeThrough) {
   let best = null, reason = "no shape";
   if (shape && shape.length > 1) {
     try {
@@ -88,7 +89,7 @@ export async function matchVariant(shape, stops, matched = new Map()) {
     }
   }
   try {
-    const [ways, path] = await valhalla.mapMatch(await valhalla.routeThrough(stops));
+    const [ways, path] = await valhalla.mapMatch(await routeThrough(stops));
     const share = farShare(stops, path);
     if (!best || share < best[0]) best = [share, ways, "stops"];
   } catch (e) {

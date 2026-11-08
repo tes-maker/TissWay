@@ -5,7 +5,7 @@
 // wheelchair when missing. The existing name is left unchanged.
 
 import { feedCodeOf } from "./detect.js";
-import { Grid, bbox, latlon } from "./geo.js";
+import { Grid, latlon, zonesAround } from "./geo.js";
 import { refSortKey } from "./gtfs.js";
 import { agencyNetworks, slug } from "./naming.js";
 import { Store, completeWayNodes, platformsIn, writeOsm } from "./osm.js";
@@ -74,7 +74,7 @@ export async function runPlatforms(feed, { network, feedId = null, max_m = 30, o
   const stops = await networkStops(feed, network);
   if (!stops.length) throw new Error(`No stop for network "${network}".`);
   onProgress("OSM platforms (Overpass)…");
-  const osm = await platformsIn(bbox(stops.map(latlon), max_m + 50));
+  const osm = await platformsIn(zonesAround(stops.map(latlon), max_m + 50));
   const matches = nearestPairs(stops, osmPlatforms(osm), max_m);
   const suffix = feedId ?? (settings.feed === "auto" ? await feedCodeOf(feed) : settings.feed);
 

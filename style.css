@@ -146,6 +146,7 @@ button.red:hover:not(:disabled) { background: var(--error); filter: brightness(.
 /* options */
 .options, .panel { display: grid; gap: 14px; }
 .formats { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.formats.profiles { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
 .formats legend { font-size: .9rem; font-weight: 700; padding: 0; margin-bottom: 6px; }
 .formats label { cursor: pointer; }
 .formats input { position: absolute; opacity: 0; width: 1px; height: 1px; }
