@@ -101,6 +101,10 @@ on the ways as a `.gpx`. With **Network calls** on in the Activity log, each pie
 In the same tab, **Extract GPX** gives the path of any OSM route relation, a bus line for instance, from its id or its link: its ways put
 end to end in travel order (a roundabout drawn whole is followed from its entry to its exit), its stops (else its platforms) as
 waypoints. A `route_master` gives one track per route; a gap between ways starts a new segment and is reported.
+Each track is drawn in the `colour` of its line and the stops as white dots circled with black (`gpx_style` and OsmAnd extensions),
+with the `ref` of the line as a label at its start and every 5 km. What OSM says of the route (`from`, `to`, `via`, `network`,
+`operator`, `interval`…) and of each stop (lines served, `ref`, `local_ref`, `shelter`, `wheelchair`…) goes in their description, with
+a link to the element in OSM.
 
 ### Correcting a whole network
 

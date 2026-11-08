@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import "./helpers.js";
-import { PROFILES, adaptPath, anchorIndices, chainWays, fits, hexColour, parseGpx, relationId, routeTags, snapAnchors, valhalla, writeGpx, writeTracks } from "../src/gpx.js";
+import { PROFILES, adaptPath, anchorIndices, chainWays, fits, hexColour, labelPoints, parseGpx, relationToGpx, relationId, routeTags, snapAnchors, valhalla, writeGpx, writeTracks } from "../src/gpx.js";
 
 const DEG_PER_M = 1 / 111_320; // in longitude at the equator, in latitude almost
 
@@ -185,4 +185,36 @@ test("tracks in the colour of their line, stops as white dots circled with black
 
 test("OSM colours as rrggbb", () => {
   assert.deepEqual(["#E3001B", "e3001b", "#e30", "Red", " navy ", "rouge", "", undefined].map(hexColour), ["e3001b", "e3001b", "ee3300", "ff0000", "000080", "", "", ""]);
+});
+
+test("labels of the line: its start, then every 5 km, none just before the end", () => {
+  const seg = Array.from({ length: 121 }, (_, i) => [49 + i * 0.001, 1]); // 13.3 km northwards
+  assert.deepEqual(labelPoints(seg).map(([lat]) => Math.round((lat - 49) * 1000)), [0, 45, 90]);
+  assert.equal(labelPoints(seg.slice(0, 50)).length, 1);
+  assert.equal(labelPoints([seg[0], seg[120]]).length, 3); // a long way with few nodes: between them
+
+});
+
+test("GPX of a relation: what OSM says of the line and of its stops, the ref of the line along the path", async () => {
+  const realFetch = globalThis.fetch;
+  const node = (id, lat, tags) => ({ type: "node", id, lat, lon: 1, ...(tags && { tags }) });
+  const elements = [
+    { type: "relation", id: 7, tags: { type: "route", route: "bus", ref: "122", name: "Bus 122: A → B", from: "A", to: "B", network: "Nomad Car", colour: "#8E44AD" },
+      members: [{ type: "node", ref: 1, role: "stop" }, { type: "node", ref: 11, role: "platform" }, { type: "node", ref: 2, role: "stop_exit_only" },
+        { type: "way", ref: 100, role: "" }] },
+    { type: "way", id: 100, nodes: [1, 2] },
+    node(1, 49, { public_transport: "stop_position", name: "A", local_ref: "2" }), node(2, 49.01, { public_transport: "stop_position", name: "B" }),
+    node(11, 49.0001, { public_transport: "platform", name: "A", ref: "14CAE", shelter: "yes", official_name: "CAEN - A" }),
+  ];
+  globalThis.fetch = async () => new Response(JSON.stringify({ elements }));
+  try {
+    const { gpx, summary } = await relationToGpx("7");
+    assert.match(gpx, /<trk><name>Bus 122: A → B<\/name><cmt>122<\/cmt><desc>ref=122\nfrom=A\nto=B\nnetwork=Nomad Car\ncolour=#8E44AD<\/desc><src>OpenStreetMap<\/src><link href="https:\/\/www.openstreetmap.org\/relation\/7">/);
+    assert.match(gpx, /<type>bus<\/type>/);
+    assert.match(gpx, /<wpt lat="49.0000000" lon="1.0000000"><name>A<\/name><cmt>CAEN - A<\/cmt><desc>lines=122\nref=14CAE\nlocal_ref=2\nshelter=yes<\/desc><src>OpenStreetMap<\/src><link href="https:\/\/www.openstreetmap.org\/node\/1">/);
+    assert.match(gpx, /<name>122<\/name><desc>Bus 122: A → B<\/desc>.*<type>label<\/type><extensions><gpx_style:fill><gpx_style:color>8E44AD/);
+    assert.equal(summary.stops, 2);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

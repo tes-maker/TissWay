@@ -10,7 +10,7 @@
 //
 // The result is a .osm for JOSM and the path on the ways as a .gpx.
 
-import { decodePolyline, dist, distancesToPolyline, pathLength, xy } from "./geo.js";
+import { decodePolyline, dist, distancesToPolyline, interpolate, pathLength, xy } from "./geo.js";
 import { chunks } from "./matching.js";
 import { slug } from "./naming.js";
 import { overpass, services, valhallaPost, valhallaReady } from "./net.js";
@@ -141,22 +141,48 @@ const trackStyle = (hex) => (hex
 const STOP_STYLE = "<extensions><gpx_style:line><gpx_style:color>000000</gpx_style:color></gpx_style:line>"
   + "<gpx_style:fill><gpx_style:color>FFFFFF</gpx_style:color></gpx_style:fill>"
   + "<osmand:color>#ffffff</osmand:color><osmand:background>circle</osmand:background></extensions>";
+/** A label of a line on its path: a dot of its colour. */
+const labelStyle = (hex) => (hex
+  ? `<extensions><gpx_style:fill><gpx_style:color>${hex.toUpperCase()}</gpx_style:color></gpx_style:fill><osmand:color>#${hex}</osmand:color>`
+    + "<osmand:background>square</osmand:background></extensions>"
+  : "");
 
-/** A GPX text of tracks [{name, segments: [[[lat, lon]]], colour}] and waypoints [{lat, lon, name}]: each track in its colour (an OSM
- * colour=*, none if empty), the waypoints as white dots circled with black. */
+const OSM_URL = "https://www.openstreetmap.org";
+const KINDS = { n: "node", w: "way", r: "relation" };
+const element = (tag, value) => (value ? `<${tag}>${escapeXml(value)}</${tag}>` : "");
+/** name, cmt, desc, src, link and type, in the order of the GPX schema. osm: "n123", "r456"... */
+const about = ({ name, cmt, desc, osm, type }) => element("name", name) + element("cmt", cmt) + element("desc", desc)
+  + (osm ? `<src>OpenStreetMap</src><link href="${OSM_URL}/${KINDS[osm[0]]}/${osm.slice(1)}"><text>${KINDS[osm[0]]} ${osm.slice(1)}</text></link>` : "");
+
+/** A GPX text of tracks [{name, cmt, desc, osm, type, colour, segments: [[[lat, lon]]]}] and waypoints [{lat, lon, name, cmt, desc, osm, type, colour}]:
+ * each track in its colour (an OSM colour=*, none if empty), a waypoint of type "label" as a dot of its colour, the others as white dots circled
+ * with black. osm: the OSM element ("r123"), given as source and link. */
 export function writeTracks(tracks, waypoints = []) {
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<gpx version="1.1" creator="tissway" xmlns="http://www.topografix.com/GPX/1/1" ${STYLE_NS}>`,
-    ...waypoints.map((w) => `  <wpt lat="${w.lat.toFixed(7)}" lon="${w.lon.toFixed(7)}">${w.name ? `<name>${escapeXml(w.name)}</name>` : ""}${STOP_STYLE}</wpt>`),
-    ...tracks.flatMap(({ name, segments, colour }) => [
-      `  <trk>${name ? `<name>${escapeXml(name)}</name>` : ""}${trackStyle(hexColour(colour))}`,
-      ...segments.flatMap((seg) => ["    <trkseg>", ...dedupePoints(seg).map(trkpt), "    </trkseg>"]),
+    ...waypoints.map((w) => `  <wpt lat="${w.lat.toFixed(7)}" lon="${w.lon.toFixed(7)}">${about(w)}${element("type", w.type)}`
+      + `${w.type === "label" ? labelStyle(hexColour(w.colour)) : STOP_STYLE}</wpt>`),
+    ...tracks.flatMap((t) => [
+      `  <trk>${about(t)}${element("type", t.type)}${trackStyle(hexColour(t.colour))}`,
+      ...t.segments.flatMap((seg) => ["    <trkseg>", ...dedupePoints(seg).map(trkpt), "    </trkseg>"]),
       "  </trk>",
     ]),
     "</gpx>",
     "",
   ].join("\n");
+}
+
+const LABEL_EVERY_M = 5000;
+
+/** Positions of the labels of a line along a segment: its start, then every LABEL_EVERY_M, none less than half of it before the end. */
+export function labelPoints(seg) {
+  const length = pathLength(seg), total = length.at(-1) || 0, out = [seg[0]];
+  for (let at = LABEL_EVERY_M, i = 1; at <= total - LABEL_EVERY_M / 2; at += LABEL_EVERY_M) {
+    while (length[i] < at) i++;
+    out.push(interpolate(seg[i - 1], seg[i], (at - length[i - 1]) / (length[i] - length[i - 1] || 1)));
+  }
+  return out;
 }
 
 /** A GPX text of a path [[lat, lon]]. */
@@ -474,7 +500,26 @@ export function chainWays(ways) {
   return segments;
 }
 
-/** A route relation (or each route of a route_master) as a GPX: its ways as a track, its stops (else its platforms) as waypoints.
+// What a route and a stop say in OSM, written as key=value lines in the description of their track or waypoint.
+const ROUTE_KEYS = ["ref", "from", "to", "via", "network", "operator", "colour", "interval", "duration", "opening_hours", "wheelchair", "website"];
+const STOP_KEYS = ["ref", "local_ref", "network", "operator", "wheelchair", "shelter", "bench", "bin", "lit", "tactile_paving", "departures_board", "passenger_information_display"];
+const tagLines = (tags, keys) => keys.filter((k) => tags?.[k]).map((k) => `${k}=${tags[k]}`).join("\n");
+const refOrder = (a, b) => a.localeCompare(b, undefined, { numeric: true });
+
+/** [[stop member, platform member or null]] of a route, in order: each stop_position with the platform that follows it, else each platform alone. */
+function stopsOf(route) {
+  const nodes = route.members.filter((m) => /^(?:stop|platform)/.test(m.role));
+  if (!nodes.some((m) => m.type === "node" && m.role.startsWith("stop"))) return nodes.filter((m) => m.type === "node").map((m) => [m, null]);
+  const out = [];
+  for (const m of nodes) {
+    if (m.role.startsWith("stop") && m.type === "node") out.push([m, null]);
+    else if (m.role.startsWith("platform") && out.length && !out.at(-1)[1]) out.at(-1)[1] = m;
+  }
+  return out;
+}
+
+/** A route relation (or each route of a route_master) as a GPX: its ways as a track, its stops (else its platforms) as waypoints, the ref of the
+ * line as labels along its path, and what OSM says of each in their descriptions, with a link to the element.
  * Returns {gpx, filename, summary}. */
 export async function relationToGpx(text, { onProgress = () => {} } = {}) {
   const id = relationId(text);
@@ -489,36 +534,45 @@ export async function relationToGpx(text, { onProgress = () => {} } = {}) {
   if (!routes.length) throw new Error(`Relation ${id} has no route.`);
 
   const at = (n) => [of.node.get(n).lat, of.node.get(n).lon];
-  const tracks = [], waypoints = [], seen = new Set();
+  const tracks = [], labels = [], stopsAt = new Map(); // node id -> {node, tags of the stop_position and its platform, lines}
   let missing = 0;
   for (const route of routes) {
     const ways = route.members.filter((m) => m.type === "way" && TRAVELLED.has(m.role) && of.way.get(m.ref)?.nodes).map((m) => of.way.get(m.ref).nodes);
     const segments = chainWays(ways).map((seg) => seg.filter((n) => of.node.has(n)).map(at)).filter((seg) => seg.length > 1);
-    const name = route.tags?.name || [route.tags?.route, route.tags?.ref].filter(Boolean).join(" ") || `Relation ${route.id}`;
+    const tags = route.tags || {}, ref = tags.ref || top.tags?.ref || "";
+    const name = tags.name || [tags.route, ref].filter(Boolean).join(" ") || `Relation ${route.id}`;
     if (!segments.length) {
       log.warn(`${name}: no way to follow`);
       continue;
     }
     if (segments.length > 1) log.warn(`${name}: ${segments.length - 1} gap(s) between its ways, written as separate segments (to check in OSM)`);
-    tracks.push({ name, segments, colour: route.tags?.colour || top.tags?.colour || "" });
-    const nodes = route.members.filter((m) => m.type === "node");
-    const stops = nodes.filter((m) => m.role.startsWith("stop"));
-    for (const m of stops.length ? stops : nodes.filter((x) => x.role.startsWith("platform"))) {
-      const node = of.node.get(m.ref);
-      if (!node) missing++;
-      else if (!seen.has(m.ref)) {
-        seen.add(m.ref);
-        waypoints.push({ lat: node.lat, lon: node.lon, name: node.tags?.name ?? "" });
+    const colour = tags.colour || top.tags?.colour || "";
+    tracks.push({ name, cmt: ref, desc: tagLines({ ...top.tags, ...tags }, ROUTE_KEYS), osm: `r${route.id}`, type: tags.route, colour, segments });
+    if (ref) for (const p of segments.flatMap(labelPoints)) labels.push({ lat: p[0], lon: p[1], name: ref, desc: name, osm: `r${route.id}`, type: "label", colour });
+    for (const [stop, platform] of stopsOf(route)) {
+      const node = of.node.get(stop.ref);
+      if (!node) {
+        missing++;
+        continue;
       }
+      if (!stopsAt.has(stop.ref)) stopsAt.set(stop.ref, { node, tags: {}, lines: [] });
+      const s = stopsAt.get(stop.ref);
+      s.tags = { ...(platform && (of.node.get(platform.ref) || of.way.get(platform.ref))?.tags), ...s.tags, ...node.tags };
+      if (ref && !s.lines.includes(ref)) s.lines.push(ref);
     }
   }
+  const waypoints = [...stopsAt.values()].map(({ node, tags, lines }) => ({
+    lat: node.lat, lon: node.lon, name: tags.name ?? "", cmt: tags.official_name !== tags.name ? tags.official_name : "",
+    desc: [lines.length ? `lines=${lines.sort(refOrder).join(";")}` : "", tagLines(tags, STOP_KEYS)].filter(Boolean).join("\n"),
+    osm: `n${node.id}`, type: tags.public_transport || tags.highway || "stop",
+  }));
   if (!tracks.length) throw new Error(`Relation ${id} has no way to follow.`);
   if (missing) log.warn(`${missing} stop(s) not found in OSM`);
   const km = tracks.flatMap((t) => t.segments).reduce((sum, seg) => sum + (pathLength(seg).at(-1) || 0), 0) / 1000;
   const title = top.tags?.name || tracks[0].name;
   log.info(`${title}: ${tracks.length} track(s), ${waypoints.length} stop(s), ${km.toFixed(1)} km`);
   return {
-    gpx: writeTracks(tracks, waypoints),
+    gpx: writeTracks(tracks, [...waypoints, ...labels]),
     filename: `${slug(title) || "relation"}_${id}.gpx`,
     summary: { tracks: tracks.length, stops: waypoints.length, Length: `${km.toFixed(1)} km` },
   };
