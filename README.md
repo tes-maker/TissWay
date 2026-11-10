@@ -84,10 +84,9 @@ coordinates are often tens of metres off), else at the projection of the GTFS st
 ### GTFS traces as GPX
 
 With a feed loaded, **Convert to → GPX traces** gives every trace of the line turned on, as it is in the GTFS (nothing is read from OSM):
-one `.gpx` per shape, and one with all of them when there are several. Trips without a shape are grouped by stop sequence and
-drawn as straight lines between their stops, with a warning. Each track is in the `route_color` of the line, its stops are waypoints
-(`stop_code`, `stop_id`, `platform_code`, wheelchair access in their description), the `ref` of the line a label along the path, and the
-description of each track gives its `shape_id`, `direction_id`, number of trips, a sample `trip_id` and its length.
+a single `.gpx` with one track per shape, and nothing else (no waypoint). Trips without a shape are grouped by stop sequence and drawn
+as straight lines between their stops, with a warning. Each track is named after its termini, drawn in the `route_color` of the line,
+and its description gives its `shape_id`, `direction_id`, number of trips, a sample `trip_id` and its length.
 
 ### Walking and cycling routes (GPX tab)
 

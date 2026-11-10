@@ -34,25 +34,17 @@ test("traces: one per shape, trips without a shape by stop sequence, by directio
     [["s", "0", "ABC", 3], ["", "1", "CA", 2], ["", "1", "CBA", 1]]);
 });
 
-test("a line as GPX: a file per trace and one with all, its stops and its colour", async () => {
+test("a line as GPX: one file, a track per trace in the line's colour, no waypoint", async () => {
   const feed = await Feed.open(makeZip(FEED));
   const route = (await feed.routes())[0];
   const { files, summary } = await lineToGpx(feed, route);
-  assert.deepEqual(files.map((f) => f.name), ["bus-12_all.gpx", "bus-12_1_gare_plage.gpx", "bus-12_2_plage_gare.gpx", "bus-12_3_plage_gare.gpx"]);
-  assert.deepEqual(summary, { traces: 3, stops: 3, trips: 4, Length: summary.Length });
-  const all = files[0].text;
-  assert.equal((all.match(/<trk>/g) || []).length, 3);
-  assert.match(all, /E3001B/);
-  assert.match(all, /<name>Gare<\/name><cmt>a1<\/cmt>/);
-  assert.match(all, /shape_id=sh1/);
-  assert.match(all, /straight lines between the stops/);
-  assert.deepEqual(parseGpx(files[1].text).points, [[49.0, 1.0], [49.005, 1.002], [49.01, 1.0]]);
-  assert.deepEqual(parseGpx(files[3].text).points, [[49.01, 1.0], [49.005, 1.0], [49.0, 1.0]]);
-});
-
-test("a line with a single trace gives a single file", async () => {
-  const feed = await Feed.open(makeZip(FEED));
-  const route = (await feed.routes())[1];
-  const { files } = await lineToGpx(feed, route);
-  assert.deepEqual(files.map((f) => f.name), ["bus-13_1_gare_plage.gpx"]);
+  assert.deepEqual(files.map((f) => f.name), ["bus-12.gpx"]);
+  assert.deepEqual(summary, { traces: 3, trips: 4, Length: summary.Length });
+  const { text } = files[0];
+  assert.equal((text.match(/<trk>/g) || []).length, 3);
+  assert.doesNotMatch(text, /<wpt/);
+  assert.match(text, /E3001B/);
+  assert.match(text, /shape_id=sh1/);
+  assert.match(text, /straight lines between the stops/);
+  assert.deepEqual(parseGpx(text).points.slice(0, 3), [[49.0, 1.0], [49.005, 1.002], [49.01, 1.0]]);
 });
