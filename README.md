@@ -22,6 +22,7 @@ npm test      # node --test, no install needed. Node >= 20.
 | PTNA list | The PTNA wiki page of a network, generated or updated from the current page. |
 | (drop an `.osm` file instead of a feed) | Adds "via …" to relations sharing a name in that file. |
 | Operator | `.osm` adding, removing or changing one operator on a line already in OSM: its route and route_master relations, its platforms, its stop_positions, as chosen. Only the `operator` tag changes. |
+| GPX traces | The traces of one line as they are in the GTFS, without OSM: a `.gpx` per shape (trips without a shape: straight lines between their stops, one per stop sequence), and one with all of them when there are several. Stops as waypoints, the line's colour, its ref as labels along the path, GTFS ids in the descriptions. |
 | (GPX tab) Walking and cycling routes | `.osm` of a `route=hiking`, `foot`, `bicycle` or `mtb` relation following a GPX track on the ways suited to the type of route chosen, and that path as a `.gpx`. Also: any OSM route relation (or route_master) as a `.gpx`: tracks in the line's colour, its stops as waypoints, the line's ref as labels along the path, OSM tags and links in the descriptions. |
 | (bottom of Settings) Correct a whole network | `.osm` putting the stops and relation names already mapped for a network in the form of this site, without changing a trace. |
 

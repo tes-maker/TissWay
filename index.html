@@ -121,6 +121,7 @@
         <label><input type="radio" name="format" value="platforms"><span><b>Platforms</b><small>.osm + .csv</small></span></label>
         <label><input type="radio" name="format" value="ptna"><span><b>PTNA list</b><small>.txt</small></span></label>
         <label><input type="radio" name="format" value="operator"><span><b>Operator</b><small>.osm</small></span></label>
+        <label><input type="radio" name="format" value="gpx"><span><b>GPX traces</b><small>.gpx</small></span></label>
       </fieldset>
 
       <div data-panel="routes" class="panel">
@@ -146,7 +147,11 @@
         <label class="check"><input id="operator-stops" type="checkbox" role="switch" checked> Stop_positions</label>
       </div>
 
-      <div data-panel="routes operator" class="panel">
+      <div data-panel="gpx" class="panel" hidden>
+        <p class="hint">Every trace the trips of the line follow, as it is in the GTFS: one .gpx per shape, and one with all of them. The stops are waypoints. Nothing is read from OSM.</p>
+      </div>
+
+      <div data-panel="routes operator gpx" class="panel">
         <label>Line, one at a time
           <input id="line-filter" type="search" placeholder="Search a line: 122, Caen…" autocomplete="off">
         </label>
