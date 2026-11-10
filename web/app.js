@@ -4,6 +4,7 @@
 import { applySettings, el, fitSecrets, initSettings, modifiedCount, setOption } from "./settings_form.js";
 import { PROFILES, parseGpx, relationId, relationToGpx, runGpx } from "./src/gpx.js";
 import { Feed } from "./src/gtfs.js";
+import { lineToGpx } from "./src/gtfs_gpx.js";
 import { agencyNetworks, slug } from "./src/naming.js";
 import { clearCaches, downloadGtfs, feedUrls, services } from "./src/net.js";
 import { runRoutes } from "./src/pipeline.js";
@@ -476,9 +477,10 @@ function refreshConvert() {
     platforms: "Convert the platforms to .osm",
     ptna: "Create the PTNA list",
     operator: operator.text,
+    gpx: line ? `Download the traces of line ${line.route_short_name || line.route_long_name} (.gpx)` : "Turn on a line",
   };
   button.textContent = labels[format()];
-  button.disabled = !$("network").value || (format() === "routes" && !line) || (format() === "operator" && !operator.ready);
+  button.disabled = !$("network").value || (["routes", "gpx"].includes(format()) && !line) || (format() === "operator" && !operator.ready);
 }
 
 // --- GPX --------------------------------------------------------------------------------------------------
@@ -596,6 +598,12 @@ async function exportOperator() {
   showResult({ files: [osmFile(filename, xml)], summary });
 }
 
+async function exportLineGpx() {
+  selectedNetwork();
+  const { files, summary } = await lineToGpx(state.feed, selectedLine(), { onProgress: progress });
+  showResult({ files, summary });
+}
+
 function openFix() {
   $("fix-title").textContent = `Correct all of ${$("fix-network").value}?`;
   $("fix-dialog").returnValue = "";
@@ -680,7 +688,7 @@ function showSettingsCount() {
   $("settings-count").hidden = !modifiedCount();
 }
 
-const EXPORTS = { routes: exportRoutes, platforms: exportPlatforms, ptna: exportPtna, operator: exportOperator };
+const EXPORTS = { routes: exportRoutes, platforms: exportPlatforms, ptna: exportPtna, operator: exportOperator, gpx: exportLineGpx };
 
 function convert() {
   hideResult();

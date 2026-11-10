@@ -81,6 +81,14 @@ coordinates are often tens of metres off), else at the projection of the GTFS st
   more goes to its platform when the platform lacks it (a platform created takes nothing from it: the stop_position keeps it) (`shelter`, `bench`…; its `ref` and ids only if it serves a single stop), and `direction` and `highway=bus_stop` are dropped. What
   describes something else on the node stays: `highway=traffic_signals`, `crossing`, `barrier`, `note`… A stop_position is shared by every route on that way, whatever its network.
 
+### GTFS traces as GPX
+
+With a feed loaded, **Convert to → GPX traces** gives every trace of the line turned on, as it is in the GTFS (nothing is read from OSM):
+one `.gpx` per shape, and one with all of them when there are several. Trips without a shape are grouped by stop sequence and
+drawn as straight lines between their stops, with a warning. Each track is in the `route_color` of the line, its stops are waypoints
+(`stop_code`, `stop_id`, `platform_code`, wheelchair access in their description), the `ref` of the line a label along the path, and the
+description of each track gives its `shape_id`, `direction_id`, number of trips, a sample `trip_id` and its length.
+
 ### Walking and cycling routes (GPX tab)
 
 The **GPX** tab turns a track (recorded or drawn: tracks, else routes, else waypoints) into a `route=hiking`, `foot`, `bicycle`
