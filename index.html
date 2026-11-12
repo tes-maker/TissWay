@@ -218,6 +218,21 @@
     <button id="again" class="link">Convert something else</button>
   </section>
 
+  <dialog id="shape-dialog" class="ref-dialog" aria-labelledby="shape-title">
+    <h2 id="shape-title" tabindex="-1" autofocus>Obsolete shape_ids</h2>
+    <p id="shape-hint" class="hint"></p>
+    <div class="ref-tools">
+      <button id="shape-all" type="button" class="small">Select all proposed</button>
+      <button id="shape-none" type="button" class="small">Select none</button>
+      <label class="check"><input id="shape-show-all" type="checkbox" role="switch"> Show relations already up to date</label>
+    </div>
+    <ul id="shape-rows" class="ref-rows"></ul>
+    <form method="dialog" class="fix-actions">
+      <button value="cancel">Cancel</button>
+      <button value="confirm" id="shape-confirm" class="red">Generate the file</button>
+    </form>
+  </dialog>
+
   <dialog id="ref-dialog" class="ref-dialog" aria-labelledby="ref-title">
     <h2 id="ref-title" tabindex="-1" autofocus>Check the stop refs</h2>
     <section id="ref-merge" class="ref-priority" aria-labelledby="ref-merge-title">
@@ -321,21 +336,6 @@
       <button id="shape-open" type="button" class="small red">Check the shape_ids…</button>
     </div>
   </details>
-
-  <dialog id="shape-dialog" class="ref-dialog" aria-labelledby="shape-title">
-    <h2 id="shape-title" tabindex="-1" autofocus>Obsolete shape_ids</h2>
-    <p id="shape-hint" class="hint"></p>
-    <div class="ref-tools">
-      <button id="shape-all" type="button" class="small">Select all proposed</button>
-      <button id="shape-none" type="button" class="small">Select none</button>
-      <label class="check"><input id="shape-show-all" type="checkbox" role="switch"> Show relations already up to date</label>
-    </div>
-    <ul id="shape-rows" class="ref-rows"></ul>
-    <form method="dialog" class="fix-actions">
-      <button value="cancel">Cancel</button>
-      <button value="confirm" id="shape-confirm" class="red">Generate the file</button>
-    </form>
-  </dialog>
 
   <dialog id="fix-dialog" class="ref-dialog" aria-labelledby="fix-title">
     <h2 id="fix-title" tabindex="-1" autofocus></h2>
