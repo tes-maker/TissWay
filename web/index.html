@@ -330,9 +330,10 @@
 
   <details class="more fix-zone" data-lock>
     <summary>Check the shape_ids of a whole network</summary>
-    <p class="hint">Compares the <code>gtfs:shape_id:*</code> of the route relations already in OSM with this feed, through their <code>ref_trips</code>: each trip still in the feed gives the shape_id it follows today. You check the list, then get a file to review. Uses the network selected above.</p>
+    <p class="hint">Compares the <code>gtfs:shape_id:*</code> of the route relations already in OSM with this feed, through their <code>ref_trips</code>: each trip still in the feed gives the shape_id it follows today. You check the list, then get a file to review.</p>
     <p id="shape-no-feed" class="hint">Load a feed on the Converter page first.</p>
     <div class="fix-row">
+      <label>Network <select id="shape-network"></select></label>
       <button id="shape-open" type="button" class="small red">Check the shape_ids…</button>
     </div>
   </details>
