@@ -24,6 +24,7 @@ npm test      # node --test, no install needed. Node >= 20.
 | Operator | `.osm` adding, removing or changing one operator on a line already in OSM: its route and route_master relations, its platforms, its stop_positions, as chosen. Only the `operator` tag changes. |
 | GPX traces | The traces of one line as they are in the GTFS, without OSM: a single `.gpx` with a track per shape (trips without a shape: straight lines between their stops, one per stop sequence), in the line's colour, GTFS ids in the descriptions. Only tracks, no waypoint. |
 | (GPX tab) Walking and cycling routes | `.osm` of a `route=hiking`, `foot`, `bicycle` or `mtb` relation following a GPX track on the ways suited to the type of route chosen, and that path as a `.gpx`. Also: any OSM route relation (or route_master) as a `.gpx`: tracks in the line's colour, its stops as waypoints, the line's ref as labels along the path, OSM tags and links in the descriptions. |
+| (bottom of Settings) Check the shape_ids of a network | `.osm` replacing the obsolete `gtfs:shape_id:*` of a network's relations already in OSM with the shape of the trips listed in their `ref_trips` in this feed. You see the list (old → new) and tick the relations to change; those without a `ref_trips` trip in the feed are only reported. |
 | (bottom of Settings) Correct a whole network | `.osm` putting the stops and relation names already mapped for a network in the form of this site, without changing a trace. |
 
 Nothing is ever uploaded to OSM: the file goes through a human, in JOSM.
