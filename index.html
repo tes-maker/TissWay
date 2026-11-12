@@ -313,6 +313,30 @@
     </div>
   </details>
 
+  <details class="more fix-zone" data-lock>
+    <summary>Check the shape_ids of a whole network</summary>
+    <p class="hint">Compares the <code>gtfs:shape_id:*</code> of the route relations already in OSM with this feed, through their <code>ref_trips</code>: each trip still in the feed gives the shape_id it follows today. You check the list, then get a file to review. Uses the network selected above.</p>
+    <p id="shape-no-feed" class="hint">Load a feed on the Converter page first.</p>
+    <div class="fix-row">
+      <button id="shape-open" type="button" class="small red">Check the shape_ids…</button>
+    </div>
+  </details>
+
+  <dialog id="shape-dialog" class="ref-dialog" aria-labelledby="shape-title">
+    <h2 id="shape-title" tabindex="-1" autofocus>Obsolete shape_ids</h2>
+    <p id="shape-hint" class="hint"></p>
+    <div class="ref-tools">
+      <button id="shape-all" type="button" class="small">Select all proposed</button>
+      <button id="shape-none" type="button" class="small">Select none</button>
+      <label class="check"><input id="shape-show-all" type="checkbox" role="switch"> Show relations already up to date</label>
+    </div>
+    <ul id="shape-rows" class="ref-rows"></ul>
+    <form method="dialog" class="fix-actions">
+      <button value="cancel">Cancel</button>
+      <button value="confirm" id="shape-confirm" class="red">Generate the file</button>
+    </form>
+  </dialog>
+
   <dialog id="fix-dialog" class="ref-dialog" aria-labelledby="fix-title">
     <h2 id="fix-title" tabindex="-1" autofocus></h2>
     <div class="error" role="alert"><b>A mass edit of what others have mapped.</b> Every stop and relation of the network may change, including stops shared with other networks.</div>

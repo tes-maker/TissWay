@@ -10,6 +10,7 @@ import { clearCaches, downloadGtfs, feedUrls, services } from "./src/net.js";
 import { runRoutes } from "./src/pipeline.js";
 import { writeOsm } from "./src/osm.js";
 import { runNetworkFix } from "./src/network_fix.js";
+import { proposeShapes, shapeFile } from "./src/shape_fix.js";
 import { runOperatorEdit } from "./src/operator_edit.js";
 import { runPlatforms } from "./src/platform_tags.js";
 import { applyPriority, closeNetworks, keepNetworkApart, listRefs, mergeNetworks, priorityRows, removeRef, restoreRef, sharedPlatforms } from "./src/ref_review.js";
@@ -406,6 +407,8 @@ function refreshFix() {
   $("fix-no-feed").hidden = usable;
   $("fix-network").disabled = !usable;
   $("fix-open").disabled = !usable || Boolean(state.controller);
+  $("shape-no-feed").hidden = usable;
+  $("shape-open").disabled = !usable || Boolean(state.controller);
 }
 
 const networkRoutes = () => state.routes.filter((r) => r.networkName === $("network").value);
@@ -622,6 +625,58 @@ function closeFix() {
   });
 }
 
+// --- shape_ids of a network ---------------------------------------------------------------------------------
+
+const SHAPE_STATUS = { changed: "obsolete", added: "none mapped", unknown: "no ref_trips trip in this feed", noshape: "trips without shape", same: "up to date" };
+
+function showShapeRows() {
+  const { plan, chosen } = state.shapes, all = $("shape-show-all").checked;
+  const editable = (r) => ["changed", "added"].includes(r.status);
+  $("shape-rows").replaceChildren(...plan.rows.filter((r) => all || r.status !== "same").map((r) => {
+    const li = document.createElement("li");
+    const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: chosen.has(r.key), disabled: !editable(r) });
+    box.addEventListener("change", () => { box.checked ? chosen.add(r.key) : chosen.delete(r.key); countShapes(); });
+    const text = document.createElement("span");
+    text.textContent = ` ${r.name} (${r.key}) — ${SHAPE_STATUS[r.status]}${editable(r) ? `: ${r.old.join(";") || "(nothing)"} → ${r.fresh.join(";")}` : ""}`;
+    li.append(box, text);
+    return li;
+  }));
+  countShapes();
+}
+
+function countShapes() {
+  const { chosen } = state.shapes;
+  $("shape-confirm").disabled = !chosen.size;
+  $("shape-confirm").textContent = `Generate the file (${chosen.size} relation${chosen.size === 1 ? "" : "s"})`;
+}
+
+function openShapes() {
+  const network = $("fix-network").value || $("network").value;
+  hideResult();
+  selectView("generate");
+  task(async () => {
+    const plan = await proposeShapes(state.feed, { network, onProgress: progress });
+    const proposed = plan.rows.filter((r) => ["changed", "added"].includes(r.status));
+    state.shapes = { plan, chosen: new Set(proposed.filter((r) => r.status === "changed").map((r) => r.key)) };
+    $("shape-hint").textContent = `${plan.network}: ${plan.total} route relations in OSM, ${plan.withoutTrips} without ref_trips (not checkable). Tag ${plan.tag}. Obsolete ones are selected; relations with no shape_id yet are listed, not selected.`;
+    $("shape-show-all").checked = false;
+    if (!plan.rows.length) throw new Error("No relation of this network has ref_trips: nothing to check.");
+    showShapeRows();
+    $("shape-dialog").returnValue = "";
+    $("shape-dialog").showModal();
+  });
+}
+
+function closeShapes() {
+  if ($("shape-dialog").returnValue !== "confirm") return;
+  try {
+    const { xml, filename, summary } = shapeFile(state.shapes.plan, state.shapes.chosen);
+    showResult({ files: [osmFile(filename, xml)], summary });
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
 async function exportVia() {
   const file = state.viaFile;
   const { xml, changes, warnings } = await renameInFile(await file.text(), $("via-prefix").value);
@@ -770,6 +825,11 @@ function wire() {
 
   $("fix-open").addEventListener("click", openFix);
   $("fix-dialog").addEventListener("close", closeFix);
+  $("shape-open").addEventListener("click", openShapes);
+  $("shape-dialog").addEventListener("close", closeShapes);
+  $("shape-show-all").addEventListener("change", showShapeRows);
+  $("shape-all").addEventListener("click", () => { for (const r of state.shapes.plan.rows) if (r.status === "changed") state.shapes.chosen.add(r.key); showShapeRows(); });
+  $("shape-none").addEventListener("click", () => { state.shapes.chosen.clear(); showShapeRows(); });
   $("show-refs").addEventListener("click", openReview);
   $("ref-dialog").addEventListener("close", closeReview);
   $("ref-show-all").addEventListener("change", showRefRows);
