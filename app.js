@@ -399,6 +399,9 @@ function showFixNetworks() {
   const select = $("fix-network"), previous = select.value;
   select.replaceChildren(...[...$("network").options].filter((o) => o.value).map((o) => new Option(o.text, o.value)));
   select.value = [...select.options].some((o) => o.value === previous) ? previous : $("network").value;
+  const shape = $("shape-network"), before = shape.value;
+  shape.replaceChildren(...[...select.options].map((o) => new Option(o.text, o.value)));
+  shape.value = [...shape.options].some((o) => o.value === before) ? before : select.value;
   refreshFix();
 }
 
@@ -407,8 +410,9 @@ function refreshFix() {
   $("fix-no-feed").hidden = usable;
   $("fix-network").disabled = !usable;
   $("fix-open").disabled = !usable || Boolean(state.controller);
-  $("shape-no-feed").hidden = usable;
-  $("shape-open").disabled = !usable || Boolean(state.controller);
+  $("shape-no-feed").hidden = Boolean(state.feed && $("shape-network").value);
+  $("shape-network").disabled = !state.feed || !$("shape-network").options.length;
+  $("shape-open").disabled = !state.feed || !$("shape-network").value || Boolean(state.controller);
 }
 
 const networkRoutes = () => state.routes.filter((r) => r.networkName === $("network").value);
@@ -651,7 +655,7 @@ function countShapes() {
 }
 
 function openShapes() {
-  const network = $("fix-network").value || $("network").value;
+  const network = $("shape-network").value;
   hideResult();
   selectView("generate");
   task(async () => {
